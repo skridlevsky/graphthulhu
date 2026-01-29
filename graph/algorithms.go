@@ -102,7 +102,8 @@ func (g *Graph) Overview() OverviewStats {
 	if len(pageStats) < limit {
 		limit = len(pageStats)
 	}
-	stats.MostConnected = pageStats[:limit]
+	stats.MostConnected = make([]PageStat, limit)
+	copy(stats.MostConnected, pageStats[:limit])
 
 	// Top 10 most linked to (by in-degree)
 	sort.Slice(pageStats, func(i, j int) bool {
