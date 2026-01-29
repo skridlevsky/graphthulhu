@@ -168,6 +168,29 @@ Add to `.cursor/mcp.json` in your project:
 }
 ```
 
+### Read-only mode
+
+To disable all write operations (create, update, delete, move):
+
+```json
+{
+  "mcpServers": {
+    "graphthulhu": {
+      "command": "/path/to/graphthulhu",
+      "args": ["--read-only"],
+      "env": {
+        "LOGSEQ_API_URL": "http://127.0.0.1:12315",
+        "LOGSEQ_API_TOKEN": "your-token-here"
+      }
+    }
+  }
+}
+```
+
+### Version control warning
+
+On startup, graphthulhu checks if your Logseq graph directory is git-controlled. If not, it prints a warning to stderr suggesting you initialize version control. Write operations cannot be undone without it.
+
 ### Environment variables
 
 | Variable | Default | Description |

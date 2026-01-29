@@ -10,7 +10,11 @@ graphthulhu
 .vscode/
 *.swp
 *.swo
+*.kate-swp
 *~
+
+# Content
+REDDIT_POST.md
 
 # OS
 .DS_Store

@@ -271,6 +271,19 @@ func (c *Client) GetPagesFromNamespace(ctx context.Context, namespace string) ([
 	return callTyped[[]types.PageEntity](c, ctx, "logseq.Editor.getPagesFromNamespace", namespace)
 }
 
+// --- App Operations ---
+
+// GraphInfo represents the current graph's metadata.
+type GraphInfo struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// GetCurrentGraph returns the name and filesystem path of the current graph.
+func (c *Client) GetCurrentGraph(ctx context.Context) (*GraphInfo, error) {
+	return callTyped[*GraphInfo](c, ctx, "logseq.App.getCurrentGraph")
+}
+
 // Ping checks if the Logseq API is reachable by attempting to list pages.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.call(ctx, "logseq.Editor.getCurrentPage")

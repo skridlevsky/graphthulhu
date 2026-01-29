@@ -9,7 +9,8 @@ import (
 )
 
 // newServer creates and configures the MCP server with all tools registered.
-func newServer(lsClient *client.Client) *mcp.Server {
+// If readOnly is true, write tools are not registered.
+func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 	srv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "graphthulhu",
@@ -21,10 +22,14 @@ func newServer(lsClient *client.Client) *mcp.Server {
 	nav := tools.NewNavigate(lsClient)
 	search := tools.NewSearch(lsClient)
 	analyze := tools.NewAnalyze(lsClient)
-	write := tools.NewWrite(lsClient)
 	journal := tools.NewJournal(lsClient)
 	flashcard := tools.NewFlashcard(lsClient)
 	whiteboard := tools.NewWhiteboard(lsClient)
+
+	var write *tools.Write
+	if !readOnly {
+		write = tools.NewWrite(lsClient)
+	}
 
 	// --- Navigate tools ---
 	mcp.AddTool(srv, &mcp.Tool{
@@ -99,39 +104,41 @@ func newServer(lsClient *client.Client) *mcp.Server {
 		Description: "Discover topic clusters by finding connected components in the knowledge graph. Returns groups of densely connected pages with their hub (most connected page in each cluster).",
 	}, analyze.TopicClusters)
 
-	// --- Write tools ---
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "create_page",
-		Description: "Create a new Logseq page with optional properties and initial blocks. Use properties for metadata like type::, status::, etc.",
-	}, write.CreatePage)
+	// --- Write tools (skipped in read-only mode) ---
+	if !readOnly {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "create_page",
+			Description: "Create a new Logseq page with optional properties and initial blocks. Use properties for metadata like type::, status::, etc.",
+		}, write.CreatePage)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "update_block",
-		Description: "Update an existing block's content by UUID. Replaces the block's entire content with the new value. Use get_page or get_block first to find the UUID.",
-	}, write.UpdateBlock)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "update_block",
+			Description: "Update an existing block's content by UUID. Replaces the block's entire content with the new value. Use get_page or get_block first to find the UUID.",
+		}, write.UpdateBlock)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "delete_block",
-		Description: "Delete a block by UUID. Removes the block and all its children from the graph. This is irreversible.",
-	}, write.DeleteBlock)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "delete_block",
+			Description: "Delete a block by UUID. Removes the block and all its children from the graph. This is irreversible.",
+		}, write.DeleteBlock)
 
-	// upsert_blocks uses raw handler because BlockInput has recursive Children field
-	// which the schema generator can't handle.
-	srv.AddTool(&mcp.Tool{
-		Name:        "upsert_blocks",
-		Description: "Batch create blocks on a page. Supports nested children for building block hierarchies. Append or prepend to existing content.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"page":{"type":"string","description":"Page name to add blocks to"},"blocks":{"type":"array","description":"Blocks to create. Each block has content (string), optional properties (object of strings), and optional children (array of blocks).","items":{"type":"object"}},"position":{"type":"string","description":"Where to add: append or prepend. Default: append"}},"required":["page","blocks"],"additionalProperties":false}`),
-	}, write.UpsertBlocksRaw)
+		// upsert_blocks uses raw handler because BlockInput has recursive Children field
+		// which the schema generator can't handle.
+		srv.AddTool(&mcp.Tool{
+			Name:        "upsert_blocks",
+			Description: "Batch create blocks on a page. Supports nested children for building block hierarchies. Append or prepend to existing content.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"page":{"type":"string","description":"Page name to add blocks to"},"blocks":{"type":"array","description":"Blocks to create. Each block has content (string), optional properties (object of strings), and optional children (array of blocks).","items":{"type":"object"}},"position":{"type":"string","description":"Where to add: append or prepend. Default: append"}},"required":["page","blocks"],"additionalProperties":false}`),
+		}, write.UpsertBlocksRaw)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "move_block",
-		Description: "Move a block to a new location — before, after, or as a child of another block.",
-	}, write.MoveBlock)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "move_block",
+			Description: "Move a block to a new location — before, after, or as a child of another block.",
+		}, write.MoveBlock)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "link_pages",
-		Description: "Create a bidirectional connection between two pages by adding a link block to each. Optionally include context describing the relationship.",
-	}, write.LinkPages)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "link_pages",
+			Description: "Create a bidirectional connection between two pages by adding a link block to each. Optionally include context describing the relationship.",
+		}, write.LinkPages)
+	}
 
 	// --- Journal tools ---
 	mcp.AddTool(srv, &mcp.Tool{
@@ -155,10 +162,12 @@ func newServer(lsClient *client.Client) *mcp.Server {
 		Description: "Get flashcards currently due for review. Returns card content, page, and SRS properties (ease factor, interval, repeats). Prioritizes new cards and overdue reviews.",
 	}, flashcard.FlashcardDue)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "flashcard_create",
-		Description: "Create a new flashcard on a page. Adds a block with #card tag (front/question) and a child block (back/answer). The card will appear in Logseq's flashcard review system.",
-	}, flashcard.FlashcardCreate)
+	if !readOnly {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "flashcard_create",
+			Description: "Create a new flashcard on a page. Adds a block with #card tag (front/question) and a child block (back/answer). The card will appear in Logseq's flashcard review system.",
+		}, flashcard.FlashcardCreate)
+	}
 
 	// --- Whiteboard tools ---
 	mcp.AddTool(srv, &mcp.Tool{
