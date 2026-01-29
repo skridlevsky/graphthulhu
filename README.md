@@ -105,7 +105,10 @@ go build -o graphthulhu .
 
 ### Enable Logseq HTTP API
 
-In Logseq, go to **Settings > Features > HTTP APIs server** and enable it. Note the authorization token shown — you'll need it for configuration.
+1. In Logseq, go to **Settings → Features** and enable **HTTP APIs server**
+2. Click the **API** icon that appears in the top toolbar
+3. Click **Start Server**
+4. Click **Create Token** and copy the generated token — you'll need it for configuration
 
 The API runs on `http://127.0.0.1:12315` by default.
 
