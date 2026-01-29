@@ -19,6 +19,10 @@ dist/
 # Content
 REDDIT_POST.md
 
+# Claude Code
+CLAUDE.md
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

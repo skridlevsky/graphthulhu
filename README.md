@@ -207,6 +207,7 @@ On startup, graphthulhu checks if your Logseq graph directory is git-controlled.
 
 ```
 main.go              Entry point — creates client and server, runs stdio
+cli.go               CLI subcommands: journal, add, search
 server.go            MCP server setup — registers all 27 tools
 client/logseq.go     Logseq HTTP API client with retry/backoff
 tools/
