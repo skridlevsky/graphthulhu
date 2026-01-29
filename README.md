@@ -90,10 +90,15 @@ It turns "tell me about X" into an AI that actually understands your knowledge g
 
 ## Install
 
-### Prerequisites
+### Download binary
 
-- [Go 1.24+](https://go.dev/dl/)
-- [Logseq](https://logseq.com) with the HTTP API server enabled
+Grab the latest release for your platform from [GitHub Releases](https://github.com/skridlevsky/graphthulhu/releases) and add it to your PATH.
+
+### go install
+
+```bash
+go install github.com/skridlevsky/graphthulhu@latest
+```
 
 ### Build from source
 
@@ -122,7 +127,7 @@ Add to your MCP settings (`~/.claude/claude_code_config.json` or project-level `
 {
   "mcpServers": {
     "graphthulhu": {
-      "command": "/path/to/graphthulhu",
+      "command": "graphthulhu",
       "env": {
         "LOGSEQ_API_URL": "http://127.0.0.1:12315",
         "LOGSEQ_API_TOKEN": "your-token-here"
@@ -140,7 +145,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 {
   "mcpServers": {
     "graphthulhu": {
-      "command": "/path/to/graphthulhu",
+      "command": "graphthulhu",
       "env": {
         "LOGSEQ_API_URL": "http://127.0.0.1:12315",
         "LOGSEQ_API_TOKEN": "your-token-here"
@@ -158,7 +163,7 @@ Add to `.cursor/mcp.json` in your project:
 {
   "mcpServers": {
     "graphthulhu": {
-      "command": "/path/to/graphthulhu",
+      "command": "graphthulhu",
       "env": {
         "LOGSEQ_API_URL": "http://127.0.0.1:12315",
         "LOGSEQ_API_TOKEN": "your-token-here"
@@ -176,7 +181,7 @@ To disable all write operations (create, update, delete, move):
 {
   "mcpServers": {
     "graphthulhu": {
-      "command": "/path/to/graphthulhu",
+      "command": "graphthulhu",
       "args": ["--read-only"],
       "env": {
         "LOGSEQ_API_URL": "http://127.0.0.1:12315",

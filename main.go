@@ -1,5 +1,7 @@
 package main
 
+var version = "dev"
+
 import (
 	"context"
 	"flag"

@@ -1,6 +1,9 @@
 # Binary
 graphthulhu
 
+# Goreleaser
+dist/
+
 # Environment
 .env
 .env.local
