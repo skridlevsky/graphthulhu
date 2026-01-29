@@ -1,7 +1,5 @@
 package main
 
-var version = "dev"
-
 import (
 	"context"
 	"flag"
@@ -13,6 +11,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skridlevsky/graphthulhu/client"
 )
+
+var version = "dev"
 
 func main() {
 	readOnly := flag.Bool("read-only", false, "Disable all write operations")

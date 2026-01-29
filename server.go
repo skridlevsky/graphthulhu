@@ -14,7 +14,7 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 	srv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "graphthulhu",
-			Version: "0.1.0",
+			Version: version,
 		},
 		nil,
 	)
