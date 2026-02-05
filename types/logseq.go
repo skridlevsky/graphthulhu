@@ -40,6 +40,38 @@ type BlockEntity struct {
 	PreBlock        bool              `json:"preBlock,omitempty"`
 }
 
+// UnmarshalJSON handles two Logseq formats for children:
+//   - Full objects from getPageBlocksTree: [{"uuid":"...", "content":"...", ...}]
+//   - Compact refs from getBlock: [["uuid", "value"]]
+//
+// The compact format is silently skipped (children left empty).
+func (b *BlockEntity) UnmarshalJSON(data []byte) error {
+	type blockAlias BlockEntity
+	type blockRaw struct {
+		blockAlias
+		RawChildren json.RawMessage `json:"children,omitempty"`
+	}
+	var raw blockRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*b = BlockEntity(raw.blockAlias)
+
+	if len(raw.RawChildren) == 0 {
+		return nil
+	}
+
+	// Try full BlockEntity array first.
+	var children []BlockEntity
+	if err := json.Unmarshal(raw.RawChildren, &children); err == nil {
+		b.Children = children
+		return nil
+	}
+
+	// Compact format [["uuid","value"], ...] — skip, leave children empty.
+	return nil
+}
+
 // PageRef is a lightweight page reference (used in block refs and path refs).
 type PageRef struct {
 	ID   int    `json:"id"`

@@ -166,6 +166,12 @@ func (c *Client) DeletePage(ctx context.Context, name string) error {
 	return err
 }
 
+// RenamePage renames a page. Logseq handles link updates automatically.
+func (c *Client) RenamePage(ctx context.Context, oldName, newName string) error {
+	_, err := c.call(ctx, "logseq.Editor.renamePage", oldName, newName)
+	return err
+}
+
 // --- Block Operations ---
 
 // GetBlock returns a block by UUID.
@@ -289,3 +295,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.call(ctx, "logseq.Editor.getCurrentPage")
 	return err
 }
+
+// HasDataScript marks the Logseq client as supporting DataScript queries.
+// Implements backend.HasDataScript.
+func (c *Client) HasDataScript() {}

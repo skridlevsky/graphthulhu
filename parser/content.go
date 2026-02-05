@@ -15,7 +15,7 @@ var (
 	blockRefPattern = regexp.MustCompile(`\(\(([0-9a-f-]{36})\)\)`)
 
 	// #tag or #[[multi word tag]] — tags
-	tagPattern      = regexp.MustCompile(`(?:^|\s)#([a-zA-Z0-9_-]+)`)
+	tagPattern = regexp.MustCompile(`(?:^|\s)#([a-zA-Z0-9_-]+)`)
 	tagBracketPattern = regexp.MustCompile(`#\[\[([^\]]+)\]\]`)
 
 	// key:: value — inline properties

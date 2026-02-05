@@ -3,8 +3,10 @@ package types
 // --- Navigate tool inputs ---
 
 type GetPageInput struct {
-	Name  string `json:"name" jsonschema:"Page name to retrieve"`
-	Depth int    `json:"depth,omitempty" jsonschema:"Max block tree depth (-1 for unlimited). Default: -1"`
+	Name      string `json:"name" jsonschema:"Page name to retrieve"`
+	Depth     int    `json:"depth,omitempty" jsonschema:"Max block tree depth (-1 for unlimited). Default: -1"`
+	MaxBlocks int    `json:"maxBlocks,omitempty" jsonschema:"Max total blocks to return. Truncates with a flag when exceeded. Default: unlimited"`
+	Compact   bool   `json:"compact,omitempty" jsonschema:"Return blocks as plain strings instead of enriched objects. Saves ~60%% tokens. Default: false"`
 }
 
 type GetBlockInput struct {
@@ -42,6 +44,7 @@ type SearchInput struct {
 	Query        string `json:"query" jsonschema:"Search text to find across all blocks"`
 	ContextLines int    `json:"contextLines,omitempty" jsonschema:"Number of parent/sibling blocks for context. Default: 2"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Max results. Default: 20"`
+	Compact      bool   `json:"compact,omitempty" jsonschema:"Return minimal results (uuid, content, page) without parsed metadata. Saves ~50%% tokens. Default: false"`
 }
 
 type QueryPropertiesInput struct {
@@ -71,13 +74,28 @@ type FindConnectionsInput struct {
 	MaxDepth int    `json:"maxDepth,omitempty" jsonschema:"Max search depth. Default: 5"`
 }
 
-// KnowledgeGapsInput has no required params — returns sparse areas.
-type KnowledgeGapsInput struct{}
+// KnowledgeGapsInput controls knowledge gap analysis filtering.
+type KnowledgeGapsInput struct {
+	MinBlockCount  int  `json:"minBlockCount,omitempty" jsonschema:"Minimum block count for orphan pages. Filters out stray/empty pages. Default: 0"`
+	ExcludeNumeric bool `json:"excludeNumeric,omitempty" jsonschema:"Exclude pages with purely numeric names (stray block refs). Default: false"`
+}
 
 // TopicClustersInput has no required params — returns community clusters.
 type TopicClustersInput struct{}
 
+// ListOrphansInput controls orphan page listing.
+type ListOrphansInput struct {
+	MinBlockCount  int  `json:"minBlockCount,omitempty" jsonschema:"Minimum block count to include. Filters stray/empty pages. Default: 0"`
+	ExcludeNumeric bool `json:"excludeNumeric,omitempty" jsonschema:"Exclude pages with purely numeric names (stray block refs). Default: false"`
+	Limit          int  `json:"limit,omitempty" jsonschema:"Max orphans to return. Default: 50"`
+}
+
 // --- Write tool inputs ---
+
+type AppendBlocksInput struct {
+	Page   string   `json:"page" jsonschema:"Page name to append blocks to"`
+	Blocks []string `json:"blocks" jsonschema:"Block contents as plain strings (same format as create_page blocks)"`
+}
 
 type CreatePageInput struct {
 	Name       string         `json:"name" jsonschema:"Page name to create"`
@@ -112,6 +130,21 @@ type MoveBlockInput struct {
 	Position   string `json:"position,omitempty" jsonschema:"Placement: before or after or child. Default: child"`
 }
 
+type DeletePageInput struct {
+	Name string `json:"name" jsonschema:"Page name to delete"`
+}
+
+type RenamePageInput struct {
+	OldName string `json:"oldName" jsonschema:"Current page name"`
+	NewName string `json:"newName" jsonschema:"New page name"`
+}
+
+type BulkUpdatePropertiesInput struct {
+	Pages    []string       `json:"pages" jsonschema:"List of page names to update"`
+	Property string         `json:"property" jsonschema:"Property key to set"`
+	Value    string         `json:"value" jsonschema:"Property value to set"`
+}
+
 type LinkPagesInput struct {
 	From    string `json:"from" jsonschema:"Source page name"`
 	To      string `json:"to" jsonschema:"Target page name"`
@@ -141,6 +174,34 @@ type ListWhiteboardsInput struct{}
 type GetWhiteboardInput struct {
 	Name string `json:"name" jsonschema:"Whiteboard name"`
 }
+
+// --- Decision tool inputs ---
+
+type DecisionCheckInput struct {
+	IncludeResolved bool `json:"includeResolved,omitempty" jsonschema:"Include resolved (DONE) decisions. Default: false"`
+}
+
+type DecisionCreateInput struct {
+	Page     string   `json:"page" jsonschema:"Page to create the decision on (where context is richest)"`
+	Question string   `json:"question" jsonschema:"The decision question"`
+	Deadline string   `json:"deadline" jsonschema:"Decision deadline (YYYY-MM-DD)"`
+	Options  []string `json:"options,omitempty" jsonschema:"Available choices"`
+	Context  string   `json:"context,omitempty" jsonschema:"Brief context for the decision"`
+}
+
+type DecisionResolveInput struct {
+	UUID    string `json:"uuid" jsonschema:"UUID of the decision block to resolve"`
+	Outcome string `json:"outcome,omitempty" jsonschema:"What was decided"`
+}
+
+type DecisionDeferInput struct {
+	UUID        string `json:"uuid" jsonschema:"UUID of the decision block to defer"`
+	NewDeadline string `json:"newDeadline" jsonschema:"New deadline (YYYY-MM-DD)"`
+	Reason      string `json:"reason,omitempty" jsonschema:"Why the decision is being deferred"`
+}
+
+// AnalysisHealthInput has no required params — audits all analysis/strategy pages.
+type AnalysisHealthInput struct{}
 
 // --- Journal tool inputs ---
 

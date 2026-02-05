@@ -3,11 +3,56 @@ package graph
 import (
 	"context"
 	"strings"
+	"sync"
+	"time"
 
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
+
+// Cache holds a recently built graph to avoid rebuilding on every analyze call.
+type Cache struct {
+	mu      sync.Mutex
+	graph   *Graph
+	built   time.Time
+	ttl     time.Duration
+	backend backend.Backend
+}
+
+// NewCache creates a graph cache with the given TTL.
+func NewCache(b backend.Backend, ttl time.Duration) *Cache {
+	return &Cache{
+		backend: b,
+		ttl:     ttl,
+	}
+}
+
+// Get returns a cached graph or builds a fresh one if expired.
+func (c *Cache) Get(ctx context.Context) (*Graph, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.graph != nil && time.Since(c.built) < c.ttl {
+		return c.graph, nil
+	}
+
+	g, err := Build(ctx, c.backend)
+	if err != nil {
+		return nil, err
+	}
+
+	c.graph = g
+	c.built = time.Now()
+	return g, nil
+}
+
+// Invalidate forces the next Get to rebuild.
+func (c *Cache) Invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.graph = nil
+}
 
 // Graph is an in-memory representation of the knowledge graph's link structure.
 type Graph struct {
@@ -22,7 +67,7 @@ type Graph struct {
 }
 
 // Build fetches all pages and their block trees, constructing the link graph.
-func Build(ctx context.Context, c *client.Client) (*Graph, error) {
+func Build(ctx context.Context, c backend.Backend) (*Graph, error) {
 	pages, err := c.GetAllPages(ctx)
 	if err != nil {
 		return nil, err

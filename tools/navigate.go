@@ -7,18 +7,18 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Navigate implements navigation MCP tools.
 type Navigate struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewNavigate creates a new Navigate tool handler.
-func NewNavigate(c *client.Client) *Navigate {
+func NewNavigate(c backend.Backend) *Navigate {
 	return &Navigate{client: c}
 }
 
@@ -43,16 +43,38 @@ func (n *Navigate) GetPage(ctx context.Context, req *mcp.CallToolRequest, input 
 	}
 
 	enrichedBlocks := enrichBlockTree(blocks, depth, 0)
+
+	totalBlocks := countBlocks(enrichedBlocks)
+	truncated := false
+
+	if input.MaxBlocks > 0 && totalBlocks > input.MaxBlocks {
+		enrichedBlocks = truncateBlockTree(enrichedBlocks, input.MaxBlocks)
+		truncated = true
+	}
+
 	outgoing := collectOutgoingLinks(enrichedBlocks)
 	backlinks := n.getBacklinks(ctx, input.Name)
 
-	result := &types.EnrichedPage{
-		PageEntity:    *page,
-		Blocks:        enrichedBlocks,
-		OutgoingLinks: outgoing,
-		BackLinks:     backlinks,
-		BlockCount:    countBlocks(enrichedBlocks),
-		LinkCount:     len(outgoing) + len(backlinks),
+	result := map[string]any{
+		"page":          page,
+		"outgoingLinks": outgoing,
+		"backlinks":     backlinks,
+		"linkCount":     len(outgoing) + len(backlinks),
+	}
+
+	if input.Compact {
+		// Compact mode: blocks as plain strings with UUIDs.
+		compactBlocks := flattenBlocksCompact(enrichedBlocks)
+		result["blocks"] = compactBlocks
+		result["blockCount"] = len(compactBlocks)
+	} else {
+		result["blocks"] = enrichedBlocks
+		result["blockCount"] = countBlocks(enrichedBlocks)
+	}
+
+	if truncated {
+		result["truncated"] = true
+		result["totalBlocks"] = totalBlocks
 	}
 
 	res, err := jsonTextResult(result)
@@ -110,6 +132,15 @@ func (n *Navigate) ListPages(ctx context.Context, req *mcp.CallToolRequest, inpu
 				continue
 			}
 			if _, ok := p.Properties[input.HasProperty]; !ok {
+				continue
+			}
+		}
+		if input.HasTag != "" {
+			blocks, err := n.client.GetPageBlocksTree(ctx, p.Name)
+			if err != nil {
+				continue
+			}
+			if !pageHasTag(blocks, strings.ToLower(input.HasTag)) {
 				continue
 			}
 		}
@@ -341,6 +372,74 @@ func (n *Navigate) getAncestors(ctx context.Context, uuid string) ([]types.Block
 	return ancestors, nil
 }
 
+// flattenBlocksCompact converts enriched blocks to compact string+UUID format.
+func flattenBlocksCompact(blocks []types.EnrichedBlock) []map[string]string {
+	var result []map[string]string
+	flattenCompactRecursive(blocks, 0, &result)
+	return result
+}
+
+func flattenCompactRecursive(blocks []types.EnrichedBlock, depth int, result *[]map[string]string) {
+	indent := strings.Repeat("  ", depth)
+	for _, b := range blocks {
+		entry := map[string]string{
+			"uuid":    b.BlockEntity.UUID,
+			"content": indent + b.BlockEntity.Content,
+		}
+		*result = append(*result, entry)
+		if len(b.BlockEntity.Children) > 0 {
+			childEnriched := enrichBlockTree(b.BlockEntity.Children, -1, 0)
+			flattenCompactRecursive(childEnriched, depth+1, result)
+		}
+	}
+}
+
+// truncateBlockTree returns at most maxBlocks blocks from the tree (depth-first).
+func truncateBlockTree(blocks []types.EnrichedBlock, maxBlocks int) []types.EnrichedBlock {
+	var result []types.EnrichedBlock
+	remaining := maxBlocks
+
+	for _, b := range blocks {
+		if remaining <= 0 {
+			break
+		}
+		remaining--
+
+		if len(b.BlockEntity.Children) > 0 && remaining > 0 {
+			// Recursively truncate children
+			childEnriched := truncateEnrichedChildren(b.BlockEntity.Children, &remaining)
+			b.BlockEntity.Children = childEnriched
+		} else {
+			b.BlockEntity.Children = nil
+		}
+
+		result = append(result, b)
+	}
+
+	return result
+}
+
+func truncateEnrichedChildren(blocks []types.BlockEntity, remaining *int) []types.BlockEntity {
+	var result []types.BlockEntity
+
+	for _, b := range blocks {
+		if *remaining <= 0 {
+			break
+		}
+		*remaining--
+
+		if len(b.Children) > 0 && *remaining > 0 {
+			b.Children = truncateEnrichedChildren(b.Children, remaining)
+		} else {
+			b.Children = nil
+		}
+
+		result = append(result, b)
+	}
+
+	return result
+}
+
 func enrichBlockTree(blocks []types.BlockEntity, maxDepth, currentDepth int) []types.EnrichedBlock {
 	if maxDepth >= 0 && currentDepth > maxDepth {
 		return nil
@@ -432,6 +531,22 @@ func sortPages(pages []types.PageEntity, sortBy string) {
 	default:
 		sortByName(pages)
 	}
+}
+
+// pageHasTag checks if any block in the tree contains the given tag (lowercase).
+func pageHasTag(blocks []types.BlockEntity, tagLower string) bool {
+	for _, b := range blocks {
+		parsed := parser.Parse(b.Content)
+		for _, t := range parsed.Tags {
+			if strings.ToLower(t) == tagLower {
+				return true
+			}
+		}
+		if len(b.Children) > 0 && pageHasTag(b.Children, tagLower) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortByName(pages []types.PageEntity) {
