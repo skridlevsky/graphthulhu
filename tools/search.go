@@ -7,18 +7,18 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Search implements search and query MCP tools.
 type Search struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewSearch creates a new Search tool handler.
-func NewSearch(c *client.Client) *Search {
+func NewSearch(c backend.Backend) *Search {
 	return &Search{client: c}
 }
 
@@ -77,8 +77,24 @@ func (s *Search) QueryProperties(ctx context.Context, req *mcp.CallToolRequest, 
 	if operator == "" {
 		operator = "eq"
 	}
-	_ = operator // used for future operator support
 
+	// Use native property search if the backend supports it (e.g. Obsidian).
+	if searcher, ok := s.client.(backend.PropertySearcher); ok {
+		results, err := searcher.FindByProperty(ctx, input.Property, input.Value, operator)
+		if err != nil {
+			return errorResult(fmt.Sprintf("property search failed: %v", err)), nil, nil
+		}
+		res, err := jsonTextResult(map[string]any{
+			"property": input.Property,
+			"value":    input.Value,
+			"operator": operator,
+			"count":    len(results),
+			"results":  results,
+		})
+		return res, nil, err
+	}
+
+	// Fall back to DataScript (Logseq).
 	var query string
 	if input.Value == "" {
 		query = fmt.Sprintf(`[:find (pull ?b [:block/uuid :block/content :block/properties {:block/page [:block/name :block/original-name]}])
@@ -116,6 +132,35 @@ func (s *Search) QueryDatalog(ctx context.Context, req *mcp.CallToolRequest, inp
 
 // FindByTag finds content by tag, including child tags.
 func (s *Search) FindByTag(ctx context.Context, req *mcp.CallToolRequest, input types.FindByTagInput) (*mcp.CallToolResult, any, error) {
+	// Use native tag search if the backend supports it (e.g. Obsidian).
+	if searcher, ok := s.client.(backend.TagSearcher); ok {
+		results, err := searcher.FindBlocksByTag(ctx, input.Tag, input.IncludeChildren)
+		if err != nil {
+			return errorResult(fmt.Sprintf("tag search failed: %v", err)), nil, nil
+		}
+
+		var enriched []map[string]any
+		for _, r := range results {
+			for _, block := range r.Blocks {
+				parsed := parser.Parse(block.Content)
+				enriched = append(enriched, map[string]any{
+					"uuid":    block.UUID,
+					"content": block.Content,
+					"parsed":  parsed,
+					"page":    r.Page,
+				})
+			}
+		}
+
+		res, err := jsonTextResult(map[string]any{
+			"tag":     input.Tag,
+			"count":   len(enriched),
+			"results": enriched,
+		})
+		return res, nil, err
+	}
+
+	// Fall back to DataScript (Logseq).
 	query := fmt.Sprintf(`[:find (pull ?b [:block/uuid :block/content {:block/page [:block/name :block/original-name]}])
 		:where
 		[?b :block/refs ?ref]

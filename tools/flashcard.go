@@ -7,17 +7,17 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Flashcard implements flashcard/SRS MCP tools.
 type Flashcard struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewFlashcard creates a new Flashcard tool handler.
-func NewFlashcard(c *client.Client) *Flashcard {
+func NewFlashcard(c backend.Backend) *Flashcard {
 	return &Flashcard{client: c}
 }
 

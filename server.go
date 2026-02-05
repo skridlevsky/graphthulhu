@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/tools"
 )
 
 // newServer creates and configures the MCP server with all tools registered.
 // If readOnly is true, write tools are not registered.
-func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
+// Tools requiring DataScript are only registered if the backend supports it.
+func newServer(b backend.Backend, readOnly bool) *mcp.Server {
 	srv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "graphthulhu",
@@ -19,19 +20,21 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 		nil,
 	)
 
-	nav := tools.NewNavigate(lsClient)
-	search := tools.NewSearch(lsClient)
-	analyze := tools.NewAnalyze(lsClient)
-	journal := tools.NewJournal(lsClient)
-	flashcard := tools.NewFlashcard(lsClient)
-	whiteboard := tools.NewWhiteboard(lsClient)
+	_, hasDataScript := b.(backend.HasDataScript)
+
+	nav := tools.NewNavigate(b)
+	search := tools.NewSearch(b)
+	analyze := tools.NewAnalyze(b)
+	journal := tools.NewJournal(b)
 
 	var write *tools.Write
+	var decision *tools.Decision
 	if !readOnly {
-		write = tools.NewWrite(lsClient)
+		write = tools.NewWrite(b)
+		decision = tools.NewDecision(b)
 	}
 
-	// --- Navigate tools ---
+	// --- Navigate tools (all backends) ---
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_page",
 		Description: "Get a Logseq page with its full recursive block tree, properties, tags, and parsed links. Every block includes extracted [[links]], ((references)), #tags, and key:: value properties.",
@@ -53,14 +56,17 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 	}, nav.GetLinks)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "get_references",
-		Description: "Get all blocks that reference a specific block via ((uuid)) block references. Returns the referencing blocks with their page context.",
-	}, nav.GetReferences)
-
-	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "traverse",
 		Description: "Find paths between two pages through the link graph using BFS. Discovers how concepts are connected through intermediate pages. Returns all paths up to max_hops length.",
 	}, nav.Traverse)
+
+	// get_references requires DataScript for ancestor lookups.
+	if hasDataScript {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "get_references",
+			Description: "Get all blocks that reference a specific block via ((uuid)) block references. Returns the referencing blocks with their page context.",
+		}, nav.GetReferences)
+	}
 
 	// --- Search tools ---
 	mcp.AddTool(srv, &mcp.Tool{
@@ -68,22 +74,26 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 		Description: "Full-text search across all blocks in the knowledge graph. Returns matching blocks with surrounding context (parent chain and sibling blocks) so you understand where each match sits.",
 	}, search.Search)
 
+	// query_properties and find_by_tag use native search on Obsidian, DataScript on Logseq.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "query_properties",
 		Description: "Find blocks and pages by property values. Search for all content with a specific property key, or filter by property value with operators (eq, contains, gt, lt).",
 	}, search.QueryProperties)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "query_datalog",
-		Description: "Execute raw DataScript/Datalog queries against the Logseq database. This is the most powerful query mechanism — can find anything. Example: [:find (pull ?b [*]) :where [?b :block/marker \"TODO\"]] finds all TODO blocks.",
-	}, search.QueryDatalog)
-
-	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "find_by_tag",
 		Description: "Find all blocks and pages with a specific tag, including child tags in the tag hierarchy. Returns content grouped by page.",
 	}, search.FindByTag)
 
-	// --- Analyze tools ---
+	// query_datalog is inherently Logseq-specific.
+	if hasDataScript {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "query_datalog",
+			Description: "Execute raw DataScript/Datalog queries against the Logseq database. This is the most powerful query mechanism — can find anything. Example: [:find (pull ?b [*]) :where [?b :block/marker \"TODO\"]] finds all TODO blocks.",
+		}, search.QueryDatalog)
+	}
+
+	// --- Analyze tools (all backends — use graph.Build which only needs GetAllPages + GetPageBlocksTree) ---
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "graph_overview",
 		Description: "Get a high-level overview of the entire knowledge graph: total pages, blocks, links, most connected pages, orphan count, namespace breakdown. Builds an in-memory graph for analysis.",
@@ -140,7 +150,35 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 		}, write.LinkPages)
 	}
 
-	// --- Journal tools ---
+	// --- Decision tools (skipped in read-only mode) ---
+	if !readOnly {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "decision_check",
+			Description: "Surface all tracked decisions in the knowledge graph. Returns open, overdue, and optionally resolved decisions with deadline status. Use at session start to check what needs attention.",
+		}, decision.DecisionCheck)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "decision_create",
+			Description: "Create a new DECIDE block on a page with #decision tag and deadline. Decisions live on the page where context is richest, not on a central backlog.",
+		}, decision.DecisionCreate)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "decision_resolve",
+			Description: "Mark a decision as DONE with today's date and an optional outcome. Changes the DECIDE marker to DONE and adds resolved:: property.",
+		}, decision.DecisionResolve)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "decision_defer",
+			Description: "Push a decision's deadline to a new date with a reason. Tracks deferral count and warns after 3+ deferrals.",
+		}, decision.DecisionDefer)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "analysis_health",
+			Description: "Audit analysis, strategy, and assessment pages for graph connectivity. A page is healthy if it has 3+ outgoing links or contains a decision. Finds isolated analyses that don't connect back to the knowledge graph.",
+		}, decision.AnalysisHealth)
+	}
+
+	// --- Journal tools (all backends — search uses native fallback for non-DataScript) ---
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "journal_range",
 		Description: "Get journal entries across a date range. Returns journal pages with their full block trees. Dates in YYYY-MM-DD format.",
@@ -151,34 +189,42 @@ func newServer(lsClient *client.Client, readOnly bool) *mcp.Server {
 		Description: "Search within journal entries specifically. Optionally filter by date range. Returns matching blocks with their journal date context.",
 	}, journal.JournalSearch)
 
-	// --- Flashcard tools ---
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "flashcard_overview",
-		Description: "Get SRS (spaced repetition) statistics: total cards, cards due for review, new vs reviewed cards, average repetitions. Gives a snapshot of the flashcard collection health.",
-	}, flashcard.FlashcardOverview)
+	// --- Flashcard tools (DataScript-only for overview/due) ---
+	if hasDataScript {
+		flashcard := tools.NewFlashcard(b)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "flashcard_due",
-		Description: "Get flashcards currently due for review. Returns card content, page, and SRS properties (ease factor, interval, repeats). Prioritizes new cards and overdue reviews.",
-	}, flashcard.FlashcardDue)
-
-	if !readOnly {
 		mcp.AddTool(srv, &mcp.Tool{
-			Name:        "flashcard_create",
-			Description: "Create a new flashcard on a page. Adds a block with #card tag (front/question) and a child block (back/answer). The card will appear in Logseq's flashcard review system.",
-		}, flashcard.FlashcardCreate)
+			Name:        "flashcard_overview",
+			Description: "Get SRS (spaced repetition) statistics: total cards, cards due for review, new vs reviewed cards, average repetitions. Gives a snapshot of the flashcard collection health.",
+		}, flashcard.FlashcardOverview)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "flashcard_due",
+			Description: "Get flashcards currently due for review. Returns card content, page, and SRS properties (ease factor, interval, repeats). Prioritizes new cards and overdue reviews.",
+		}, flashcard.FlashcardDue)
+
+		if !readOnly {
+			mcp.AddTool(srv, &mcp.Tool{
+				Name:        "flashcard_create",
+				Description: "Create a new flashcard on a page. Adds a block with #card tag (front/question) and a child block (back/answer). The card will appear in Logseq's flashcard review system.",
+			}, flashcard.FlashcardCreate)
+		}
 	}
 
-	// --- Whiteboard tools ---
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "list_whiteboards",
-		Description: "List all Logseq whiteboards in the graph. Whiteboards are infinite canvas spaces where concepts are visually arranged and connected.",
-	}, whiteboard.ListWhiteboards)
+	// --- Whiteboard tools (Logseq-specific) ---
+	if hasDataScript {
+		whiteboard := tools.NewWhiteboard(b)
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "get_whiteboard",
-		Description: "Get a whiteboard's content including embedded pages, block references, visual connections between elements, and any text content. Reveals how concepts are spatially organized.",
-	}, whiteboard.GetWhiteboard)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "list_whiteboards",
+			Description: "List all Logseq whiteboards in the graph. Whiteboards are infinite canvas spaces where concepts are visually arranged and connected.",
+		}, whiteboard.ListWhiteboards)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "get_whiteboard",
+			Description: "Get a whiteboard's content including embedded pages, block references, visual connections between elements, and any text content. Reveals how concepts are spatially organized.",
+		}, whiteboard.GetWhiteboard)
+	}
 
 	return srv
 }

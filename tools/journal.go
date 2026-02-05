@@ -8,18 +8,18 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Journal implements journal MCP tools.
 type Journal struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewJournal creates a new Journal tool handler.
-func NewJournal(c *client.Client) *Journal {
+func NewJournal(c backend.Backend) *Journal {
 	return &Journal{client: c}
 }
 
@@ -93,6 +93,35 @@ func (j *Journal) JournalRange(ctx context.Context, req *mcp.CallToolRequest, in
 
 // JournalSearch searches within journal entries.
 func (j *Journal) JournalSearch(ctx context.Context, req *mcp.CallToolRequest, input types.JournalSearchInput) (*mcp.CallToolResult, any, error) {
+	// Use native journal search if the backend supports it (e.g. Obsidian).
+	if searcher, ok := j.client.(backend.JournalSearcher); ok {
+		results, err := searcher.SearchJournals(ctx, input.Query, input.From, input.To)
+		if err != nil {
+			return errorResult(fmt.Sprintf("journal search failed: %v", err)), nil, nil
+		}
+
+		var matches []map[string]any
+		for _, r := range results {
+			for _, block := range r.Blocks {
+				parsed := parser.Parse(block.Content)
+				matches = append(matches, map[string]any{
+					"content": block.Content,
+					"parsed":  parsed,
+					"page":    r.Page,
+					"date":    r.Date,
+				})
+			}
+		}
+
+		res, err := jsonTextResult(map[string]any{
+			"query":   input.Query,
+			"count":   len(matches),
+			"results": matches,
+		})
+		return res, nil, err
+	}
+
+	// Fall back to DataScript (Logseq).
 	query := `[:find (pull ?b [:block/uuid :block/content {:block/page [:block/name :block/original-name :block/journal-day]}])
 		:where
 		[?b :block/content ?content]

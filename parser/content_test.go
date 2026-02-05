@@ -218,6 +218,36 @@ func TestTags_DeduplicateMixed(t *testing.T) {
 	}
 }
 
+func TestTags_NumericAccepted(t *testing.T) {
+	// Numeric tags are valid — matches Logseq behavior.
+	// Defense against ghost pages is backtick-wrapping in source files, not parser rejection.
+	r := Parse("See #137 for details")
+	if len(r.Tags) != 1 || r.Tags[0] != "137" {
+		t.Errorf("Tags = %v, want [137]", r.Tags)
+	}
+}
+
+func TestTags_MultipleNumeric(t *testing.T) {
+	r := Parse("#151, #152, #153 all submitted")
+	if len(r.Tags) != 3 {
+		t.Fatalf("Tags = %v, want 3 (151, 152, 153)", r.Tags)
+	}
+}
+
+func TestTags_MixedNumericAndAlpha(t *testing.T) {
+	r := Parse("#urgent see #137 and #todo")
+	if len(r.Tags) != 3 {
+		t.Fatalf("Tags = %v, want 3 (urgent, 137, todo)", r.Tags)
+	}
+}
+
+func TestTags_AlphanumericStartingWithLetter(t *testing.T) {
+	r := Parse("#v2 and #a1b2")
+	if len(r.Tags) != 2 {
+		t.Fatalf("Tags = %v, want 2 (v2, a1b2)", r.Tags)
+	}
+}
+
 // --- Properties ---
 
 func TestProperties_Single(t *testing.T) {
@@ -228,7 +258,7 @@ func TestProperties_Single(t *testing.T) {
 }
 
 func TestProperties_Multiple(t *testing.T) {
-	r := Parse("status:: active\npriority:: high\nowner:: Max")
+	r := Parse("status:: active\npriority:: high\nowner:: Hanna")
 	if len(r.Properties) != 3 {
 		t.Fatalf("Properties = %v, want 3 entries", r.Properties)
 	}
@@ -238,7 +268,7 @@ func TestProperties_Multiple(t *testing.T) {
 	if r.Properties["priority"] != "high" {
 		t.Errorf("priority = %q", r.Properties["priority"])
 	}
-	if r.Properties["owner"] != "Max" {
+	if r.Properties["owner"] != "Hanna" {
 		t.Errorf("owner = %q", r.Properties["owner"])
 	}
 }

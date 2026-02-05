@@ -5,18 +5,18 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/graph"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Analyze implements graph analysis MCP tools.
 type Analyze struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewAnalyze creates a new Analyze tool handler.
-func NewAnalyze(c *client.Client) *Analyze {
+func NewAnalyze(c backend.Backend) *Analyze {
 	return &Analyze{client: c}
 }
 

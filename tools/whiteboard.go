@@ -7,18 +7,18 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Whiteboard implements whiteboard MCP tools.
 type Whiteboard struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewWhiteboard creates a new Whiteboard tool handler.
-func NewWhiteboard(c *client.Client) *Whiteboard {
+func NewWhiteboard(c backend.Backend) *Whiteboard {
 	return &Whiteboard{client: c}
 }
 

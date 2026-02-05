@@ -289,3 +289,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.call(ctx, "logseq.Editor.getCurrentPage")
 	return err
 }
+
+// HasDataScript marks the Logseq client as supporting DataScript queries.
+// Implements backend.HasDataScript.
+func (c *Client) HasDataScript() {}

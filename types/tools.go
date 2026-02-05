@@ -142,6 +142,34 @@ type GetWhiteboardInput struct {
 	Name string `json:"name" jsonschema:"Whiteboard name"`
 }
 
+// --- Decision tool inputs ---
+
+type DecisionCheckInput struct {
+	IncludeResolved bool `json:"includeResolved,omitempty" jsonschema:"Include resolved (DONE) decisions. Default: false"`
+}
+
+type DecisionCreateInput struct {
+	Page     string   `json:"page" jsonschema:"Page to create the decision on (where context is richest)"`
+	Question string   `json:"question" jsonschema:"The decision question"`
+	Deadline string   `json:"deadline" jsonschema:"Decision deadline (YYYY-MM-DD)"`
+	Options  []string `json:"options,omitempty" jsonschema:"Available choices"`
+	Context  string   `json:"context,omitempty" jsonschema:"Brief context for the decision"`
+}
+
+type DecisionResolveInput struct {
+	UUID    string `json:"uuid" jsonschema:"UUID of the decision block to resolve"`
+	Outcome string `json:"outcome,omitempty" jsonschema:"What was decided"`
+}
+
+type DecisionDeferInput struct {
+	UUID        string `json:"uuid" jsonschema:"UUID of the decision block to defer"`
+	NewDeadline string `json:"newDeadline" jsonschema:"New deadline (YYYY-MM-DD)"`
+	Reason      string `json:"reason,omitempty" jsonschema:"Why the decision is being deferred"`
+}
+
+// AnalysisHealthInput has no required params — audits all analysis/strategy pages.
+type AnalysisHealthInput struct{}
+
 // --- Journal tool inputs ---
 
 type JournalRangeInput struct {

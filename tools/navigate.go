@@ -7,18 +7,18 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Navigate implements navigation MCP tools.
 type Navigate struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewNavigate creates a new Navigate tool handler.
-func NewNavigate(c *client.Client) *Navigate {
+func NewNavigate(c backend.Backend) *Navigate {
 	return &Navigate{client: c}
 }
 

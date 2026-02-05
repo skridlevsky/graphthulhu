@@ -6,17 +6,17 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/types"
 )
 
 // Write implements write MCP tools.
 type Write struct {
-	client *client.Client
+	client backend.Backend
 }
 
 // NewWrite creates a new Write tool handler.
-func NewWrite(c *client.Client) *Write {
+func NewWrite(c backend.Backend) *Write {
 	return &Write{client: c}
 }
 

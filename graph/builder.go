@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/skridlevsky/graphthulhu/client"
+	"github.com/skridlevsky/graphthulhu/backend"
 	"github.com/skridlevsky/graphthulhu/parser"
 	"github.com/skridlevsky/graphthulhu/types"
 )
@@ -22,7 +22,7 @@ type Graph struct {
 }
 
 // Build fetches all pages and their block trees, constructing the link graph.
-func Build(ctx context.Context, c *client.Client) (*Graph, error) {
+func Build(ctx context.Context, c backend.Backend) (*Graph, error) {
 	pages, err := c.GetAllPages(ctx)
 	if err != nil {
 		return nil, err
