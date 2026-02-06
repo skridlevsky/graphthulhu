@@ -24,7 +24,7 @@ It turns "tell me about X" into an AI that actually understands your knowledge g
 
 ## Tools
 
-33 tools across 9 categories. Most work with both backends; some are Logseq-only (DataScript queries, flashcards, whiteboards).
+37 tools across 9 categories. Most work with both backends; some are Logseq-only (DataScript queries, flashcards, whiteboards).
 
 ### Navigate
 
