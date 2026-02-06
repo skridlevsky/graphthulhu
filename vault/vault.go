@@ -1000,6 +1000,7 @@ func (c *Client) removeBlocksFromIndexLocked(blocks []types.BlockEntity) {
 func (c *Client) updateLinksAcrossVaultLocked(oldName, newName string) []error {
 	oldLink := "[[" + oldName + "]]"
 	newLink := "[[" + newName + "]]"
+	lowerOld := strings.ToLower(oldName)
 
 	var errs []error
 	seen := make(map[string]bool)
@@ -1008,6 +1009,11 @@ func (c *Client) updateLinksAcrossVaultLocked(oldName, newName string) []error {
 			continue
 		}
 		seen[page.lowerName] = true
+
+		// Skip the page being renamed — its file was already moved.
+		if page.lowerName == lowerOld {
+			continue
+		}
 
 		absPath, err := c.safePath(page.filePath)
 		if err != nil {
