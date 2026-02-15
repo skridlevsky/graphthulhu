@@ -42,12 +42,8 @@ func (j *Journal) JournalRange(ctx context.Context, req *mcp.CallToolRequest, in
 	var journals []map[string]any
 
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		// Try common Logseq journal page name formats
-		pageNames := []string{
-			d.Format("Jan 2nd, 2006"),
-			d.Format("2006-01-02"),
-			d.Format("January 2, 2006"),
-		}
+		// Try common Logseq journal page name formats.
+		pageNames := journalPageNames(d)
 
 		var foundPage *types.PageEntity
 		var foundName string
@@ -89,6 +85,35 @@ func (j *Journal) JournalRange(ctx context.Context, req *mcp.CallToolRequest, in
 		"journals":     journals,
 	})
 	return res, nil, err
+}
+
+func journalPageNames(d time.Time) []string {
+	day := d.Day()
+	suffix := ordinalSuffix(day)
+
+	return []string{
+		fmt.Sprintf("%s %d%s, %d", d.Format("Jan"), day, suffix, d.Year()),
+		fmt.Sprintf("%s %d%s, %d", d.Format("January"), day, suffix, d.Year()),
+		d.Format("2006-01-02"),
+		d.Format("January 2, 2006"),
+	}
+}
+
+func ordinalSuffix(day int) string {
+	if day%100 >= 11 && day%100 <= 13 {
+		return "th"
+	}
+
+	switch day % 10 {
+	case 1:
+		return "st"
+	case 2:
+		return "nd"
+	case 3:
+		return "rd"
+	default:
+		return "th"
+	}
 }
 
 // JournalSearch searches within journal entries.
