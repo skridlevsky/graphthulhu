@@ -64,7 +64,12 @@ func (n *Navigate) GetPage(ctx context.Context, req *mcp.CallToolRequest, input 
 
 	if input.Compact {
 		// Compact mode: blocks as plain strings with UUIDs.
-		compactBlocks := flattenBlocksCompact(enrichedBlocks)
+		// Use raw blocks (not enriched) to avoid exponential re-enrichment.
+		compactBlocks := flattenBlocksCompact(blocks)
+		if input.MaxBlocks > 0 && len(compactBlocks) > input.MaxBlocks {
+			compactBlocks = compactBlocks[:input.MaxBlocks]
+			truncated = true
+		}
 		result["blocks"] = compactBlocks
 		result["blockCount"] = len(compactBlocks)
 	} else {
@@ -372,24 +377,24 @@ func (n *Navigate) getAncestors(ctx context.Context, uuid string) ([]types.Block
 	return ancestors, nil
 }
 
-// flattenBlocksCompact converts enriched blocks to compact string+UUID format.
-func flattenBlocksCompact(blocks []types.EnrichedBlock) []map[string]string {
+// flattenBlocksCompact converts raw blocks to compact string+UUID format.
+// Uses BlockEntity directly to avoid re-enriching the tree (which caused exponential blowup).
+func flattenBlocksCompact(blocks []types.BlockEntity) []map[string]string {
 	var result []map[string]string
 	flattenCompactRecursive(blocks, 0, &result)
 	return result
 }
 
-func flattenCompactRecursive(blocks []types.EnrichedBlock, depth int, result *[]map[string]string) {
+func flattenCompactRecursive(blocks []types.BlockEntity, depth int, result *[]map[string]string) {
 	indent := strings.Repeat("  ", depth)
 	for _, b := range blocks {
 		entry := map[string]string{
-			"uuid":    b.BlockEntity.UUID,
-			"content": indent + b.BlockEntity.Content,
+			"uuid":    b.UUID,
+			"content": indent + b.Content,
 		}
 		*result = append(*result, entry)
-		if len(b.BlockEntity.Children) > 0 {
-			childEnriched := enrichBlockTree(b.BlockEntity.Children, -1, 0)
-			flattenCompactRecursive(childEnriched, depth+1, result)
+		if len(b.Children) > 0 {
+			flattenCompactRecursive(b.Children, depth+1, result)
 		}
 	}
 }
