@@ -55,7 +55,7 @@ type QueryPropertiesInput struct {
 
 type QueryDatalogInput struct {
 	Query  string `json:"query" jsonschema:"Datalog/DataScript query string"`
-	Inputs []any  `json:"inputs,omitempty" jsonschema:"Query input bindings"`
+	Inputs []string `json:"inputs,omitempty" jsonschema:"Query input bindings (string representations)"`
 }
 
 type FindByTagInput struct {
