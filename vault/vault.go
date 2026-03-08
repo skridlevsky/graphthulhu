@@ -57,14 +57,15 @@ type cachedPage struct {
 // Client implements backend.Backend for an Obsidian vault on disk.
 // It reads all .md files on initialization and serves queries from memory.
 type Client struct {
-	vaultPath    string
-	dailyFolder  string // e.g. "daily notes"
-	pages        map[string]*cachedPage // lowercase name → page
-	backlinks    map[string][]backlink  // lowercase target → backlinks
-	blockIndex   map[string]*blockLookup // uuid → block + page
-	searchIndex  *SearchIndex            // inverted index for full-text search
-	mu           sync.RWMutex            // protects all maps above
-	watcher      *fsnotify.Watcher       // file system watcher
+	vaultPath     string
+	dailyFolder   string                  // e.g. "daily notes"
+	includeHidden bool                    // index directories starting with "."
+	pages         map[string]*cachedPage  // lowercase name → page
+	backlinks     map[string][]backlink   // lowercase target → backlinks
+	blockIndex    map[string]*blockLookup // uuid → block + page
+	searchIndex   *SearchIndex            // inverted index for full-text search
+	mu            sync.RWMutex            // protects all maps above
+	watcher       *fsnotify.Watcher       // file system watcher
 }
 
 // blockLookup stores a block and its page for UUID-based retrieval.
@@ -81,15 +82,23 @@ func WithDailyFolder(folder string) Option {
 	return func(c *Client) { c.dailyFolder = folder }
 }
 
+// WithIncludeHidden controls whether directories starting with "." are indexed.
+// By default hidden directories are skipped. When set to true, hidden directories
+// are included (except .git, which is always skipped). This is useful for projects
+// that store configuration or documentation in directories like .specify/ or .opencode/.
+func WithIncludeHidden(include bool) Option {
+	return func(c *Client) { c.includeHidden = include }
+}
+
 // New creates a new Obsidian vault client. Call Load() to index the vault.
 func New(vaultPath string, opts ...Option) *Client {
 	c := &Client{
-		vaultPath:    vaultPath,
-		dailyFolder:  "daily notes",
-		pages:        make(map[string]*cachedPage),
-		backlinks:    make(map[string][]backlink),
-		blockIndex:   make(map[string]*blockLookup),
-		searchIndex:  NewSearchIndex(),
+		vaultPath:   vaultPath,
+		dailyFolder: "daily notes",
+		pages:       make(map[string]*cachedPage),
+		backlinks:   make(map[string][]backlink),
+		blockIndex:  make(map[string]*blockLookup),
+		searchIndex: NewSearchIndex(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -105,7 +114,11 @@ func (c *Client) Load() error {
 		}
 
 		// Skip hidden directories (.obsidian, .git, etc).
-		if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
+		// Always skip .git regardless of includeHidden setting.
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if info.IsDir() && strings.HasPrefix(info.Name(), ".") && !c.includeHidden {
 			return filepath.SkipDir
 		}
 		if info.IsDir() {
@@ -265,8 +278,12 @@ func (c *Client) addWatcherDirs(root string) error {
 		if !info.IsDir() {
 			return nil
 		}
-		// Skip hidden directories (.obsidian, .git, etc).
-		if strings.HasPrefix(info.Name(), ".") && path != root {
+		// Always skip .git regardless of includeHidden setting.
+		if info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		// Skip hidden directories (.obsidian, etc) unless includeHidden is set.
+		if strings.HasPrefix(info.Name(), ".") && path != root && !c.includeHidden {
 			return filepath.SkipDir
 		}
 		return c.watcher.Add(path)
@@ -298,8 +315,12 @@ func (c *Client) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Skip hidden directories.
-	if strings.Contains(event.Name, "/.") {
+	// Always skip .git directory events.
+	if strings.Contains(event.Name, "/.git/") || strings.HasSuffix(event.Name, "/.git") {
+		return
+	}
+	// Skip hidden directories unless includeHidden is set.
+	if strings.Contains(event.Name, "/.") && !c.includeHidden {
 		return
 	}
 
@@ -384,7 +405,7 @@ func (c *Client) Ping(_ context.Context) error {
 func (c *Client) GetAllPages(_ context.Context) ([]types.PageEntity, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	seen := make(map[string]bool)
 	var pages []types.PageEntity
 	for _, page := range c.pages {
@@ -400,7 +421,7 @@ func (c *Client) GetAllPages(_ context.Context) ([]types.PageEntity, error) {
 func (c *Client) GetPage(_ context.Context, nameOrID any) (*types.PageEntity, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	name := fmt.Sprint(nameOrID)
 	page, ok := c.pages[strings.ToLower(name)]
 	if !ok {
@@ -412,7 +433,7 @@ func (c *Client) GetPage(_ context.Context, nameOrID any) (*types.PageEntity, er
 func (c *Client) GetPageBlocksTree(_ context.Context, nameOrID any) ([]types.BlockEntity, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	name := fmt.Sprint(nameOrID)
 	page, ok := c.pages[strings.ToLower(name)]
 	if !ok {
@@ -424,7 +445,7 @@ func (c *Client) GetPageBlocksTree(_ context.Context, nameOrID any) ([]types.Blo
 func (c *Client) GetBlock(_ context.Context, uuid string, opts ...map[string]any) (*types.BlockEntity, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	lookup, ok := c.blockIndex[uuid]
 	if !ok {
 		return nil, nil
@@ -439,7 +460,7 @@ func (c *Client) GetBlock(_ context.Context, uuid string, opts ...map[string]any
 func (c *Client) GetPageLinkedReferences(_ context.Context, nameOrID any) (json.RawMessage, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	name := fmt.Sprint(nameOrID)
 	key := strings.ToLower(name)
 
@@ -779,7 +800,7 @@ func (c *Client) UpdateBlock(_ context.Context, uuid string, content string, opt
 	// The file might have the UUID embedded, so we need to search for it
 	// We'll look for the old content with or without UUID comment
 	oldContentWithUUID := embedUUID(oldContent, uuid)
-	
+
 	var oldInFile, newInFile string
 	if strings.Contains(fileStr, oldContentWithUUID) {
 		// File has UUID embedded
@@ -1209,7 +1230,7 @@ func findBlockByContent(blocks []types.BlockEntity, content string) *types.Block
 func (c *Client) FindBlocksByTag(_ context.Context, tag string, includeChildren bool) ([]backend.TagResult, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	tagLower := strings.ToLower(tag)
 	var results []backend.TagResult
 
@@ -1254,7 +1275,7 @@ func findTagInBlocks(blocks []types.BlockEntity, tagLower string, matches *[]typ
 func (c *Client) FindByProperty(_ context.Context, key, value, operator string) ([]backend.PropertyResult, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	var results []backend.PropertyResult
 
 	seen := make(map[string]bool)
@@ -1313,7 +1334,7 @@ func (c *Client) FindByProperty(_ context.Context, key, value, operator string) 
 func (c *Client) SearchJournals(_ context.Context, query, from, to string) ([]backend.JournalResult, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	queryLower := strings.ToLower(query)
 	var results []backend.JournalResult
 

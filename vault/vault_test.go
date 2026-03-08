@@ -824,51 +824,51 @@ func TestEmbeddedUUIDParsing(t *testing.T) {
 	// Create a file with embedded UUIDs
 	testUUID1 := "12345678-1234-1234-1234-123456789abc"
 	testUUID2 := "87654321-4321-4321-4321-cba987654321"
-	
+
 	content := "---\ntype: test\n---\n\n" +
 		"# Heading 1 <!-- id: " + testUUID1 + " -->\n\n" +
 		"Some content\n\n" +
 		"## Heading 2 <!-- id: " + testUUID2 + " -->\n\n" +
 		"More content"
-	
+
 	_, err := c.CreatePage(ctx, "uuid-test", map[string]any{"type": "test"}, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	// Write the file with embedded UUIDs directly
 	absPath := filepath.Join(c.vaultPath, "uuid-test.md")
 	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	
+
 	// Reload the vault
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	// Check that the UUIDs are preserved
 	blocks, err := c.GetPageBlocksTree(ctx, "uuid-test")
 	if err != nil {
 		t.Fatalf("GetPageBlocksTree: %v", err)
 	}
-	
+
 	if len(blocks) == 0 {
 		t.Fatal("expected blocks")
 	}
-	
+
 	// First block should have testUUID1
 	if blocks[0].UUID != testUUID1 {
 		t.Errorf("block 0 UUID = %q, want %q", blocks[0].UUID, testUUID1)
 	}
-	
+
 	// Content should not contain the UUID comment
 	if strings.Contains(blocks[0].Content, "<!-- id:") {
 		t.Errorf("block content should not contain UUID comment, got: %q", blocks[0].Content)
 	}
-	
+
 	// Second block (child) should have testUUID2
 	if len(blocks[0].Children) == 0 {
 		t.Fatal("expected child blocks")
@@ -881,54 +881,54 @@ func TestEmbeddedUUIDParsing(t *testing.T) {
 func TestFileWithoutEmbeddedUUIDs(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
-	
+
 	// Create a file without embedded UUIDs (old format)
 	content := "---\ntype: test\n---\n\n# Old Format\n\nNo UUIDs here"
-	
+
 	_, err := c.CreatePage(ctx, "old-format", map[string]any{"type": "test"}, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	absPath := filepath.Join(c.vaultPath, "old-format.md")
 	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	
+
 	// Reload
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	// Should get deterministic UUIDs
 	blocks, err := c.GetPageBlocksTree(ctx, "old-format")
 	if err != nil {
 		t.Fatalf("GetPageBlocksTree: %v", err)
 	}
-	
+
 	if len(blocks) == 0 {
 		t.Fatal("expected blocks")
 	}
-	
+
 	uuid1 := blocks[0].UUID
 	if uuid1 == "" {
 		t.Error("expected non-empty UUID")
 	}
-	
+
 	// Re-parse same file, should get same UUIDs (deterministic)
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load second time: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	blocks2, _ := c.GetPageBlocksTree(ctx, "old-format")
 	if len(blocks2) == 0 {
 		t.Fatal("expected blocks on second parse")
 	}
-	
+
 	if blocks2[0].UUID != uuid1 {
 		t.Errorf("UUID changed between parses: %q != %q", blocks2[0].UUID, uuid1)
 	}
@@ -937,61 +937,61 @@ func TestFileWithoutEmbeddedUUIDs(t *testing.T) {
 func TestWriteThenReparse_UUIDsStable(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
-	
+
 	// Create page and append blocks
 	_, err := c.CreatePage(ctx, "stability-test", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	block1, err := c.AppendBlockInPage(ctx, "stability-test", "# First Heading")
 	if err != nil {
 		t.Fatalf("AppendBlockInPage 1: %v", err)
 	}
 	uuid1 := block1.UUID
-	
+
 	block2, err := c.AppendBlockInPage(ctx, "stability-test", "## Second Heading")
 	if err != nil {
 		t.Fatalf("AppendBlockInPage 2: %v", err)
 	}
 	uuid2 := block2.UUID
-	
+
 	// Re-parse the vault
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	// UUIDs should be stable
 	blocks, err := c.GetPageBlocksTree(ctx, "stability-test")
 	if err != nil {
 		t.Fatalf("GetPageBlocksTree: %v", err)
 	}
-	
+
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 root block, got %d", len(blocks))
 	}
-	
+
 	if blocks[0].UUID != uuid1 {
 		t.Errorf("block 0 UUID changed: %q != %q", blocks[0].UUID, uuid1)
 	}
-	
+
 	if len(blocks[0].Children) != 1 {
 		t.Fatalf("expected 1 child block, got %d", len(blocks[0].Children))
 	}
-	
+
 	if blocks[0].Children[0].UUID != uuid2 {
 		t.Errorf("child block UUID changed: %q != %q", blocks[0].Children[0].UUID, uuid2)
 	}
-	
+
 	// Verify UUIDs are embedded in the file
 	absPath := filepath.Join(c.vaultPath, "stability-test.md")
 	fileContent, err := os.ReadFile(absPath)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	
+
 	fileStr := string(fileContent)
 	if !strings.Contains(fileStr, "<!-- id: "+uuid1+" -->") {
 		t.Error("file should contain UUID comment for first block")
@@ -1004,40 +1004,40 @@ func TestWriteThenReparse_UUIDsStable(t *testing.T) {
 func TestUpdateBlockPreservesUUID(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
-	
+
 	_, err := c.CreatePage(ctx, "update-test", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	block, err := c.AppendBlockInPage(ctx, "update-test", "# Original Content")
 	if err != nil {
 		t.Fatalf("AppendBlockInPage: %v", err)
 	}
 	originalUUID := block.UUID
-	
+
 	// Update the block
 	err = c.UpdateBlock(ctx, originalUUID, "# Updated Content")
 	if err != nil {
 		t.Fatalf("UpdateBlock: %v", err)
 	}
-	
+
 	// Re-parse and verify UUID is preserved
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	blocks, _ := c.GetPageBlocksTree(ctx, "update-test")
 	if len(blocks) == 0 {
 		t.Fatal("expected blocks after update")
 	}
-	
+
 	if blocks[0].UUID != originalUUID {
 		t.Errorf("UUID changed after update: %q != %q", blocks[0].UUID, originalUUID)
 	}
-	
+
 	if !strings.Contains(blocks[0].Content, "Updated Content") {
 		t.Errorf("content not updated: %q", blocks[0].Content)
 	}
@@ -1046,42 +1046,42 @@ func TestUpdateBlockPreservesUUID(t *testing.T) {
 func TestPrependBlockEmbedsUUID(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
-	
+
 	_, err := c.CreatePage(ctx, "prepend-test", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	// Append a block first
 	_, err = c.AppendBlockInPage(ctx, "prepend-test", "# Second Block")
 	if err != nil {
 		t.Fatalf("AppendBlockInPage: %v", err)
 	}
-	
+
 	// Prepend a block
 	block, err := c.PrependBlockInPage(ctx, "prepend-test", "# First Block")
 	if err != nil {
 		t.Fatalf("PrependBlockInPage: %v", err)
 	}
 	prependedUUID := block.UUID
-	
+
 	// Re-parse
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	blocks, _ := c.GetPageBlocksTree(ctx, "prepend-test")
 	if len(blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(blocks))
 	}
-	
+
 	// First block should have the prepended UUID
 	if blocks[0].UUID != prependedUUID {
 		t.Errorf("first block UUID = %q, want %q", blocks[0].UUID, prependedUUID)
 	}
-	
+
 	// Verify file contains UUID
 	absPath := filepath.Join(c.vaultPath, "prepend-test.md")
 	fileContent, _ := os.ReadFile(absPath)
@@ -1093,35 +1093,35 @@ func TestPrependBlockEmbedsUUID(t *testing.T) {
 func TestInsertBlockEmbedsUUID(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
-	
+
 	_, err := c.CreatePage(ctx, "insert-test", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
-	
+
 	parent, err := c.AppendBlockInPage(ctx, "insert-test", "# Parent")
 	if err != nil {
 		t.Fatalf("AppendBlockInPage: %v", err)
 	}
-	
+
 	child, err := c.InsertBlock(ctx, parent.UUID, "Child content", nil)
 	if err != nil {
 		t.Fatalf("InsertBlock: %v", err)
 	}
 	childUUID := child.UUID
-	
+
 	// Re-parse
 	c = New(c.vaultPath)
 	if err := c.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	c.BuildBacklinks()
-	
+
 	blocks, _ := c.GetPageBlocksTree(ctx, "insert-test")
 	if len(blocks) == 0 || len(blocks[0].Children) == 0 {
 		t.Fatal("expected parent with child")
 	}
-	
+
 	if blocks[0].Children[0].UUID != childUUID {
 		t.Errorf("child UUID = %q, want %q", blocks[0].Children[0].UUID, childUUID)
 	}
@@ -1147,5 +1147,193 @@ func TestSafePath_Traversal(t *testing.T) {
 	_, err = vc.safePath("../outside.md")
 	if err == nil {
 		t.Error("path traversal via .. should be rejected")
+	}
+}
+
+func TestIncludeHidden_DefaultSkipsHiddenDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a hidden directory with a markdown file.
+	hiddenDir := filepath.Join(tmpDir, ".hidden-config")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "settings.md"), []byte("# Settings\n\nHidden content."), 0o644); err != nil {
+		t.Fatalf("WriteFile hidden: %v", err)
+	}
+
+	// Create a visible file.
+	if err := os.WriteFile(filepath.Join(tmpDir, "visible.md"), []byte("# Visible\n\nVisible content."), 0o644); err != nil {
+		t.Fatalf("WriteFile visible: %v", err)
+	}
+
+	// Default: hidden dirs should be skipped.
+	c := New(tmpDir)
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c.BuildBacklinks()
+
+	ctx := context.Background()
+	pages, err := c.GetAllPages(ctx)
+	if err != nil {
+		t.Fatalf("GetAllPages: %v", err)
+	}
+
+	for _, p := range pages {
+		if strings.Contains(p.Name, ".hidden-config") {
+			t.Errorf("hidden directory content should be skipped by default, found: %s", p.Name)
+		}
+	}
+
+	if len(pages) != 1 {
+		t.Errorf("expected 1 page (visible only), got %d", len(pages))
+	}
+}
+
+func TestIncludeHidden_WithFlagIndexesHiddenDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a hidden directory with a markdown file.
+	hiddenDir := filepath.Join(tmpDir, ".hidden-config")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "settings.md"), []byte("# Settings\n\nHidden content."), 0o644); err != nil {
+		t.Fatalf("WriteFile hidden: %v", err)
+	}
+
+	// Create a visible file.
+	if err := os.WriteFile(filepath.Join(tmpDir, "visible.md"), []byte("# Visible\n\nVisible content."), 0o644); err != nil {
+		t.Fatalf("WriteFile visible: %v", err)
+	}
+
+	// With includeHidden: hidden dirs should be indexed.
+	c := New(tmpDir, WithIncludeHidden(true))
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c.BuildBacklinks()
+
+	ctx := context.Background()
+	pages, err := c.GetAllPages(ctx)
+	if err != nil {
+		t.Fatalf("GetAllPages: %v", err)
+	}
+
+	if len(pages) != 2 {
+		t.Errorf("expected 2 pages (visible + hidden), got %d", len(pages))
+		for _, p := range pages {
+			t.Logf("  page: %s", p.Name)
+		}
+	}
+
+	foundHidden := false
+	for _, p := range pages {
+		if strings.Contains(p.Name, ".hidden-config") {
+			foundHidden = true
+		}
+	}
+	if !foundHidden {
+		t.Error("expected to find hidden directory content with WithIncludeHidden(true)")
+	}
+}
+
+func TestIncludeHidden_AlwaysSkipsGitDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a .git directory with a markdown file (simulating git internals).
+	gitDir := filepath.Join(tmpDir, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD.md"), []byte("# HEAD\n\nGit internal."), 0o644); err != nil {
+		t.Fatalf("WriteFile .git: %v", err)
+	}
+
+	// Create a regular hidden directory.
+	hiddenDir := filepath.Join(tmpDir, ".config")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "app.md"), []byte("# App Config\n\nConfig content."), 0o644); err != nil {
+		t.Fatalf("WriteFile .config: %v", err)
+	}
+
+	// With includeHidden: .git should still be skipped, but .config should be indexed.
+	c := New(tmpDir, WithIncludeHidden(true))
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c.BuildBacklinks()
+
+	ctx := context.Background()
+	pages, err := c.GetAllPages(ctx)
+	if err != nil {
+		t.Fatalf("GetAllPages: %v", err)
+	}
+
+	for _, p := range pages {
+		if strings.Contains(p.Name, ".git") {
+			t.Errorf(".git content should always be skipped, found: %s", p.Name)
+		}
+	}
+
+	foundConfig := false
+	for _, p := range pages {
+		if strings.Contains(p.Name, ".config") {
+			foundConfig = true
+		}
+	}
+	if !foundConfig {
+		t.Error("expected .config to be indexed with WithIncludeHidden(true)")
+	}
+
+	if len(pages) != 1 {
+		t.Errorf("expected 1 page (.config/app only), got %d", len(pages))
+		for _, p := range pages {
+			t.Logf("  page: %s", p.Name)
+		}
+	}
+}
+
+func TestIncludeHidden_WatcherIndexesHiddenFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a hidden directory.
+	hiddenDir := filepath.Join(tmpDir, ".specify")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Create vault with includeHidden.
+	c := New(tmpDir, WithIncludeHidden(true))
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c.BuildBacklinks()
+
+	// Start watching.
+	if err := c.Watch(); err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer c.Close()
+
+	// Create a file inside the hidden directory.
+	if err := os.WriteFile(filepath.Join(hiddenDir, "constitution.md"), []byte("# Constitution\n\nCore principles."), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Give the watcher time to process.
+	time.Sleep(200 * time.Millisecond)
+
+	// Should be indexed.
+	ctx := context.Background()
+	page, err := c.GetPage(ctx, ".specify/constitution")
+	if err != nil {
+		t.Fatalf("GetPage: %v", err)
+	}
+	if page == nil {
+		t.Error("file in hidden directory not indexed via watcher with WithIncludeHidden(true)")
 	}
 }
