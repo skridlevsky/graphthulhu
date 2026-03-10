@@ -63,6 +63,7 @@ func runServe(args []string) {
 	backendType := fs.String("backend", "", "Backend type: logseq (default) or obsidian")
 	vaultPath := fs.String("vault", "", "Path to Obsidian vault (required for obsidian backend)")
 	dailyFolder := fs.String("daily-folder", "daily notes", "Daily notes subfolder name (obsidian only)")
+	includeHidden := fs.Bool("include-hidden", false, "Index directories starting with '.' (obsidian only, .git is always skipped)")
 	httpAddr := fs.String("http", "", "HTTP address to listen on (e.g. :8080). Uses streamable HTTP transport instead of stdio.")
 	fs.Parse(args)
 
@@ -86,20 +87,20 @@ func runServe(args []string) {
 			fmt.Fprintf(os.Stderr, "graphthulhu: --vault or OBSIDIAN_VAULT_PATH required for obsidian backend\n")
 			os.Exit(1)
 		}
-		vc := vault.New(vp, vault.WithDailyFolder(*dailyFolder))
+		vc := vault.New(vp, vault.WithDailyFolder(*dailyFolder), vault.WithIncludeHidden(*includeHidden))
 		if err := vc.Load(); err != nil {
 			fmt.Fprintf(os.Stderr, "graphthulhu: failed to load vault: %v\n", err)
 			os.Exit(1)
 		}
 		vc.BuildBacklinks()
-		
+
 		// Start file watcher.
 		if err := vc.Watch(); err != nil {
 			fmt.Fprintf(os.Stderr, "graphthulhu: failed to start watcher: %v\n", err)
 			os.Exit(1)
 		}
 		defer vc.Close()
-		
+
 		b = vc
 	case "logseq":
 		lsClient := client.New("", "")
@@ -144,6 +145,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  --backend logseq|obsidian       Backend type (default: logseq)\n")
 	fmt.Fprintf(os.Stderr, "  --vault PATH                    Obsidian vault path\n")
 	fmt.Fprintf(os.Stderr, "  --daily-folder NAME             Daily notes folder (default: daily notes)\n")
+	fmt.Fprintf(os.Stderr, "  --include-hidden                Index directories starting with '.' (obsidian only)\n")
 	fmt.Fprintf(os.Stderr, "  --read-only                     Disable write operations\n")
 	fmt.Fprintf(os.Stderr, "  --http ADDR                     Listen on HTTP (e.g. :8080) instead of stdio\n")
 	fmt.Fprintf(os.Stderr, "\nAll CLI commands read from stdin when no TEXT argument is given.\n")
