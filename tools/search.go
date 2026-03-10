@@ -180,7 +180,11 @@ func (s *Search) QueryProperties(ctx context.Context, req *mcp.CallToolRequest, 
 
 // QueryDatalog executes raw DataScript queries.
 func (s *Search) QueryDatalog(ctx context.Context, req *mcp.CallToolRequest, input types.QueryDatalogInput) (*mcp.CallToolResult, any, error) {
-	raw, err := s.client.DatascriptQuery(ctx, input.Query, input.Inputs...)
+	anyInputs := make([]any, len(input.Inputs))
+	for i, v := range input.Inputs {
+		anyInputs[i] = v
+	}
+	raw, err := s.client.DatascriptQuery(ctx, input.Query, anyInputs...)
 	if err != nil {
 		return errorResult(fmt.Sprintf("Datalog query failed: %v", err)), nil, nil
 	}
