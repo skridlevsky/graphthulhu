@@ -216,3 +216,19 @@ type JournalSearchInput struct {
 	From  string `json:"from,omitempty" jsonschema:"Start date filter (YYYY-MM-DD)"`
 	To    string `json:"to,omitempty" jsonschema:"End date filter (YYYY-MM-DD)"`
 }
+
+// --- Attachment tool inputs (Obsidian-only) ---
+
+type UploadAttachmentInput struct {
+	Path          string `json:"path" jsonschema:"Path relative to vault root, e.g. '00_Inbox/email-2026-04-28/Attachements/invoice.pdf'. Parent directories are auto-created. Cannot end in .md (use create_page for markdown)."`
+	ContentBase64 string `json:"contentBase64" jsonschema:"File content, base64-encoded (standard alphabet, not URL-safe)."`
+}
+
+type DeleteAttachmentInput struct {
+	Path string `json:"path" jsonschema:"Path relative to vault root. Cannot end in .md (use delete_page)."`
+}
+
+type ListAttachmentsInput struct {
+	Folder    string `json:"folder" jsonschema:"Folder path relative to vault root. Required (no default global scan)."`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"Walk sub-folders. Default: false."`
+}
