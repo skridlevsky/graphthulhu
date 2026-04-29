@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
@@ -66,6 +67,13 @@ type Client struct {
 	searchIndex   *SearchIndex            // inverted index for full-text search
 	mu            sync.RWMutex            // protects all maps above
 	watcher       *fsnotify.Watcher       // file system watcher
+
+	// Debounce des events fsnotify. Permet d'absorber les sequences
+	// Remove+Create rapprochees generees par les atomic temp+rename
+	// (write_raw_page interne, iCloud sync, editeurs). Voir watcher_debounce.go.
+	pendingMu     sync.Mutex
+	pendingEvents map[string]*pendingEvent
+	debounceDelay time.Duration // 0 -> defaultDebounceDelay (100ms)
 }
 
 // blockLookup stores a block and its page for UUID-based retrieval.
@@ -308,7 +316,10 @@ func (c *Client) watchLoop() {
 	}
 }
 
-// handleEvent processes a single fsnotify event.
+// handleEvent processes a single fsnotify event by scheduling a debounced
+// resolution. La resolution effective lit l'etat disque apres debounceDelay
+// pour absorber les sequences Remove+Create rapprochees (atomic temp+rename).
+// Voir watcher_debounce.go pour le coalescer et les helpers atomiques.
 func (c *Client) handleEvent(event fsnotify.Event) {
 	// Skip non-.md files.
 	if !strings.HasSuffix(event.Name, ".md") {
@@ -330,38 +341,12 @@ func (c *Client) handleEvent(event fsnotify.Event) {
 		return
 	}
 
+	// Tous les events Create/Write/Remove/Rename sont coalesces par path. La
+	// resolution finale (apres debounceDelay) lit l'etat disque reel : presence
+	// = reindex, absence = remove. Race-free vis-a-vis des atomic rename.
 	switch {
-	case event.Op&fsnotify.Create == fsnotify.Create, event.Op&fsnotify.Write == fsnotify.Write:
-		// File created or modified: re-index it.
-		content, err := os.ReadFile(event.Name)
-		if err != nil {
-			log.Printf("graphthulhu: failed to read %s: %v\n", event.Name, err)
-			return
-		}
-		info, err := os.Stat(event.Name)
-		if err != nil {
-			log.Printf("graphthulhu: failed to stat %s: %v\n", event.Name, err)
-			return
-		}
-		c.indexFile(filepath.ToSlash(relPath), string(content), info)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: reindexed %s\n", relPath)
-
-	case event.Op&fsnotify.Remove == fsnotify.Remove:
-		// File deleted: remove from index.
-		name := strings.TrimSuffix(filepath.ToSlash(relPath), ".md")
-		lowerName := strings.ToLower(name)
-		c.removePageFromIndex(lowerName)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: removed %s from index\n", relPath)
-
-	case event.Op&fsnotify.Rename == fsnotify.Rename:
-		// File renamed: treat as remove (new name will trigger Create event).
-		name := strings.TrimSuffix(filepath.ToSlash(relPath), ".md")
-		lowerName := strings.ToLower(name)
-		c.removePageFromIndex(lowerName)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: removed %s from index (rename)\n", relPath)
+	case event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0:
+		c.scheduleEventResolution(event.Name, relPath)
 	}
 }
 
