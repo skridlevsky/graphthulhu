@@ -88,20 +88,26 @@ func runServe(args []string) {
 			os.Exit(1)
 		}
 		vc := vault.New(vp, vault.WithDailyFolder(*dailyFolder), vault.WithIncludeHidden(*includeHidden))
-		if err := vc.Load(); err != nil {
-			fmt.Fprintf(os.Stderr, "graphthulhu: failed to load vault: %v\n", err)
-			os.Exit(1)
-		}
-		vc.BuildBacklinks()
-
-		// Start file watcher.
-		if err := vc.Watch(); err != nil {
-			fmt.Fprintf(os.Stderr, "graphthulhu: failed to start watcher: %v\n", err)
-			os.Exit(1)
-		}
 		defer vc.Close()
 
-		b = vc
+		lb := backend.NewLazyBackend(vc)
+		go func() {
+			if err := vc.Load(); err != nil {
+				fmt.Fprintf(os.Stderr, "graphthulhu: failed to load vault: %v\n", err)
+				lb.MarkFailed(err)
+				return
+			}
+			vc.BuildBacklinks()
+			if err := vc.Watch(); err != nil {
+				fmt.Fprintf(os.Stderr, "graphthulhu: failed to start watcher: %v\n", err)
+				lb.MarkFailed(err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "graphthulhu: vault indexed and ready\n")
+			lb.MarkReady()
+		}()
+
+		b = lb
 	case "logseq":
 		lsClient := client.New("", "")
 		checkGraphVersionControl(lsClient)
