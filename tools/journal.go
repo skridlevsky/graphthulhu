@@ -87,15 +87,30 @@ func (j *Journal) JournalRange(ctx context.Context, req *mcp.CallToolRequest, in
 	return res, nil, err
 }
 
+// journalPageNames returns the candidate Logseq journal page names for a date,
+// ordered most-common-first. Logseq lets users pick a date format, so we try
+// the defaults first, then "day-first" variants that several locales prefer
+// (e.g. "16th Apr 2026"), then formats without ordinals.
 func journalPageNames(d time.Time) []string {
 	day := d.Day()
 	suffix := ordinalSuffix(day)
+	year := d.Year()
+	monShort := d.Format("Jan")
+	monLong := d.Format("January")
 
 	return []string{
-		fmt.Sprintf("%s %d%s, %d", d.Format("Jan"), day, suffix, d.Year()),
-		fmt.Sprintf("%s %d%s, %d", d.Format("January"), day, suffix, d.Year()),
+		// Default Logseq formats: "Apr 16th, 2026", "April 16th, 2026"
+		fmt.Sprintf("%s %d%s, %d", monShort, day, suffix, year),
+		fmt.Sprintf("%s %d%s, %d", monLong, day, suffix, year),
+		// ISO and "April 16, 2026"
 		d.Format("2006-01-02"),
 		d.Format("January 2, 2006"),
+		// Day-first with ordinal: "16th Apr 2026", "16th April 2026"
+		fmt.Sprintf("%d%s %s %d", day, suffix, monShort, year),
+		fmt.Sprintf("%d%s %s %d", day, suffix, monLong, year),
+		// Day-first without ordinal: "16 Apr 2026", "16 April 2026"
+		fmt.Sprintf("%d %s %d", day, monShort, year),
+		fmt.Sprintf("%d %s %d", day, monLong, year),
 	}
 }
 
