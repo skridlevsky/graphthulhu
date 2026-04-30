@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
@@ -66,6 +67,14 @@ type Client struct {
 	searchIndex   *SearchIndex            // inverted index for full-text search
 	mu            sync.RWMutex            // protects all maps above
 	watcher       *fsnotify.Watcher       // file system watcher
+
+	// Debounce state for fsnotify events. Absorbs the back-to-back
+	// Remove+Create sequences produced by atomic temp+rename saves
+	// (internal write paths, iCloud sync, external editors). See
+	// watcher_debounce.go for the coalescer and atomic helpers.
+	pendingMu     sync.Mutex
+	pendingEvents map[string]*pendingEvent
+	debounceDelay time.Duration // 0 → defaultDebounceDelay (100ms)
 }
 
 // blockLookup stores a block and its page for UUID-based retrieval.
@@ -308,7 +317,10 @@ func (c *Client) watchLoop() {
 	}
 }
 
-// handleEvent processes a single fsnotify event.
+// handleEvent processes a single fsnotify event by scheduling a debounced
+// resolution. The actual resolve reads disk state after debounceDelay so it
+// absorbs the back-to-back Remove+Create sequences produced by atomic
+// temp+rename. See watcher_debounce.go for the coalescer and atomic helpers.
 func (c *Client) handleEvent(event fsnotify.Event) {
 	// Skip non-.md files.
 	if !strings.HasSuffix(event.Name, ".md") {
@@ -330,43 +342,26 @@ func (c *Client) handleEvent(event fsnotify.Event) {
 		return
 	}
 
+	// Coalesce every Create/Write/Remove/Rename per path. The final
+	// resolve (after debounceDelay) reads real disk state: present →
+	// reindex, absent → remove. Race-free against atomic rename.
 	switch {
-	case event.Op&fsnotify.Create == fsnotify.Create, event.Op&fsnotify.Write == fsnotify.Write:
-		// File created or modified: re-index it.
-		content, err := os.ReadFile(event.Name)
-		if err != nil {
-			log.Printf("graphthulhu: failed to read %s: %v\n", event.Name, err)
-			return
-		}
-		info, err := os.Stat(event.Name)
-		if err != nil {
-			log.Printf("graphthulhu: failed to stat %s: %v\n", event.Name, err)
-			return
-		}
-		c.indexFile(filepath.ToSlash(relPath), string(content), info)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: reindexed %s\n", relPath)
-
-	case event.Op&fsnotify.Remove == fsnotify.Remove:
-		// File deleted: remove from index.
-		name := strings.TrimSuffix(filepath.ToSlash(relPath), ".md")
-		lowerName := strings.ToLower(name)
-		c.removePageFromIndex(lowerName)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: removed %s from index\n", relPath)
-
-	case event.Op&fsnotify.Rename == fsnotify.Rename:
-		// File renamed: treat as remove (new name will trigger Create event).
-		name := strings.TrimSuffix(filepath.ToSlash(relPath), ".md")
-		lowerName := strings.ToLower(name)
-		c.removePageFromIndex(lowerName)
-		c.BuildBacklinks()
-		log.Printf("graphthulhu: removed %s from index (rename)\n", relPath)
+	case event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0:
+		c.scheduleEventResolution(event.Name, relPath)
 	}
 }
 
-// Close stops the file watcher.
+// Close stops the file watcher and any pending debounce timers.
+// Without this, timers scheduled before shutdown would still fire and
+// mutate c.pages / log spam after the server has stopped.
 func (c *Client) Close() error {
+	c.pendingMu.Lock()
+	for _, pe := range c.pendingEvents {
+		pe.timer.Stop()
+	}
+	c.pendingEvents = nil
+	c.pendingMu.Unlock()
+
 	if c.watcher != nil {
 		return c.watcher.Close()
 	}

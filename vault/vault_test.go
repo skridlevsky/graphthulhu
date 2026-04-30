@@ -656,8 +656,8 @@ func TestWatchFileCreate(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// Give the watcher time to process.
-	time.Sleep(100 * time.Millisecond)
+	// Give the watcher time to process (fsnotify event + 100ms debounce + resolve).
+	time.Sleep(250 * time.Millisecond)
 
 	// Should be indexed.
 	page, err := c.GetPage(ctx, "watched-create")
@@ -695,8 +695,8 @@ func TestWatchFileModify(t *testing.T) {
 		t.Fatalf("WriteFile modify: %v", err)
 	}
 
-	// Give the watcher time to process.
-	time.Sleep(100 * time.Millisecond)
+	// Give the watcher time to process (fsnotify event + 100ms debounce + resolve).
+	time.Sleep(250 * time.Millisecond)
 
 	// Should have updated content.
 	blocks, err := c.GetPageBlocksTree(ctx, "watched-modify")
@@ -743,8 +743,8 @@ func TestWatchFileDelete(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	// Give the watcher time to process.
-	time.Sleep(100 * time.Millisecond)
+	// Give the watcher time to process (fsnotify event + 100ms debounce + resolve).
+	time.Sleep(250 * time.Millisecond)
 
 	// Should be gone from index.
 	page, err := c.GetPage(ctx, "watched-delete")
