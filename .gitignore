@@ -8,6 +8,15 @@ dist/
 .env
 .env.local
 
+# Secrets / credentials
+*.pem
+*.key
+*.crt
+*.token
+.envrc
+secrets.*
+credentials.*
+
 # IDE
 .idea/
 .vscode/
@@ -16,15 +25,44 @@ dist/
 *.kate-swp
 *~
 
-# Content
+# Content / personal notes
 REDDIT_POST.md
+TODO*.md
+NOTES*.md
 
-# Claude Code
+# AI tooling
 CLAUDE.md
 .claude/
+.cursor/
+.cursorrules
+.aider*
+.continue/
+.codeium/
+.windsurf/
+.specstory/
+
+# PKM tool config (don't accidentally commit a personal vault)
+.obsidian/
+.logseq/
+.trash/
+
+# Go artifacts
+vendor/
+*.test
+coverage.out
+coverage.html
+*.prof
+go.work
+go.work.sum
+
+# Logs
+*.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
 *.exe
 *.bak
+desktop.ini
+$RECYCLE.BIN/
