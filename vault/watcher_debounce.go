@@ -8,26 +8,25 @@ import (
 	"time"
 )
 
-// defaultDebounceDelay : delai d'attente avant de resoudre un event fsnotify.
-// 100ms : suffisant pour absorber un atomic temp+rename macOS / iCloud (qui
-// genere des sequences Remove puis Create rapprochees, fenetre typique ~10ms),
-// court enough pour ne pas faire trainer les vrais deletes ni les writes
-// legitimes. Voir bd-s5c Phase 7.
+// defaultDebounceDelay is how long we wait before resolving an fsnotify
+// event. 100ms absorbs the macOS / iCloud atomic temp+rename pattern
+// (Remove followed by Create within ~10ms) without noticeably delaying
+// real deletes or legitimate writes.
 const defaultDebounceDelay = 100 * time.Millisecond
 
-// pendingEvent encapsule un timer + son path pour le debounce d'events fsnotify.
+// pendingEvent pairs a debounce timer with the path it resolves.
 type pendingEvent struct {
 	absPath string
 	relPath string
 	timer   *time.Timer
 }
 
-// scheduleEventResolution coalesce les events fsnotify pour un meme path.
-// Si un event arrive pour un path deja en attente, le timer existant est
-// reset et on attend a nouveau debounceDelay avant de resoudre. La resolution
-// finale lit l'etat disque et applique remove OU reindex selon. Race-free
-// vis-a-vis des atomic temp+rename : peu importe la sequence Remove+Create,
-// le resultat reflete toujours ce qui est sur disque au moment du resolve.
+// scheduleEventResolution coalesces fsnotify events for the same path.
+// A new event for an in-flight path resets the existing timer so we wait
+// debounceDelay again before resolving. The resolver reads disk state
+// and applies remove or reindex accordingly — race-free against atomic
+// temp+rename, since the final state always reflects what is on disk at
+// resolve time, no matter which Remove/Create sequence we received.
 func (c *Client) scheduleEventResolution(absPath, relPath string) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
@@ -49,20 +48,25 @@ func (c *Client) scheduleEventResolution(absPath, relPath string) {
 	pe.timer = time.AfterFunc(delay, func() {
 		c.resolveFileState(absPath, relPath)
 		c.pendingMu.Lock()
-		delete(c.pendingEvents, absPath)
+		// Match by pointer identity: a concurrent schedule may have
+		// installed a newer pendingEvent between timer fire and lock
+		// acquisition. Don't delete that newer entry.
+		if cur, ok := c.pendingEvents[absPath]; ok && cur == pe {
+			delete(c.pendingEvents, absPath)
+		}
 		c.pendingMu.Unlock()
 	})
 	c.pendingEvents[absPath] = pe
 }
 
-// resolveFileState lit l'etat disque actuel et applique remove ou reindex.
-// Appele par le timer de debounce. Race-free vis-a-vis de fsnotify : peu
-// importe la sequence d'events recue, le resultat final reflete toujours ce
-// qui est sur disque au moment de l'appel.
+// resolveFileState reads the current disk state and applies remove or
+// reindex. Called by the debounce timer. Race-free against fsnotify: the
+// final state always reflects what is on disk at the time of the call,
+// no matter which event sequence was delivered.
 func (c *Client) resolveFileState(absPath, relPath string) {
 	info, err := os.Stat(absPath)
 	if err != nil {
-		// Fichier absent (delete reel ou rename non resolu). Remove definitif.
+		// File absent (real delete or unresolved rename). Remove for good.
 		name := strings.TrimSuffix(filepath.ToSlash(relPath), ".md")
 		lowerName := strings.ToLower(name)
 		c.removePageWithLinks(lowerName)
@@ -78,11 +82,11 @@ func (c *Client) resolveFileState(absPath, relPath string) {
 	log.Printf("graphthulhu: reindexed %s\n", relPath)
 }
 
-// indexFileWithLinks parses + indexe un fichier ET reconstruit les links sous
-// un seul lock. Race-free : un lecteur ne peut pas voir un etat ou la page
-// existe dans c.pages mais ou les backlinks ne refletent pas encore le nouveau
-// contenu. Remplace la sequence indexFile + BuildBacklinks (2 prises de lock
-// distinctes avec fenetre intermediaire visible aux lecteurs).
+// indexFileWithLinks parses, indexes a file, AND rebuilds backlinks under
+// a single lock. A reader cannot observe a state where the page exists in
+// c.pages but backlinks don't yet reflect its new content. Replaces the
+// previous indexFile + BuildBacklinks sequence (two separate lock
+// acquisitions with an observable intermediate window).
 func (c *Client) indexFileWithLinks(relPath, content string, info os.FileInfo) {
 	page := c.parseFile(relPath, content, info)
 	c.mu.Lock()
@@ -91,9 +95,8 @@ func (c *Client) indexFileWithLinks(relPath, content string, info os.FileInfo) {
 	c.rebuildLinksLocked()
 }
 
-// removePageWithLinks retire une page ET reconstruit les links sous un seul
-// lock. Pendant la construction des nouveaux backlinks, l'ensemble est
-// atomique aux lecteurs.
+// removePageWithLinks removes a page AND rebuilds backlinks under a
+// single lock, so the removal is atomic to readers.
 func (c *Client) removePageWithLinks(lowerName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -101,9 +104,9 @@ func (c *Client) removePageWithLinks(lowerName string) {
 	c.rebuildLinksLocked()
 }
 
-// flushPendingEventsForTest force la resolution synchrone de tous les events
-// en attente. Utilise uniquement par les tests pour eviter d'attendre
-// debounceDelay reel. Production code n'a aucune raison d'appeler ca.
+// flushPendingEventsForTest synchronously resolves all pending events.
+// Used only by tests to avoid waiting for the real debounceDelay.
+// Production code has no reason to call this.
 func (c *Client) flushPendingEventsForTest() {
 	c.pendingMu.Lock()
 	pending := make([]*pendingEvent, 0, len(c.pendingEvents))

@@ -10,18 +10,22 @@ import (
 	"time"
 )
 
-// TestDebounce_AtomicRenameNoMissingPage simule un atomic temp+rename : la
-// sequence Remove(target.md) suivie immediatement d'un Create(target.md) ne
-// doit PAS faire disparaitre la page de l'index, meme transitoirement.
+// TestDebounce_AtomicRenameNoMissingPage simulates an atomic temp+rename:
+// a Remove(target.md) immediately followed by Create(target.md) must NOT
+// make the page disappear from the index, even transiently.
 //
-// Avant le fix bd-s5c Phase 7, le watcher faisait remove inconditionnel sur
-// l'event Remove et reindex sur Create — fenetre intermediaire ~10ms ou un
-// get_page concurrent voyait "page absente".
+// Before this fix, the watcher did unconditional remove on Remove and
+// reindex on Create — a ~10ms intermediate window where a concurrent
+// get_page would see "page absent."
 func TestDebounce_AtomicRenameNoMissingPage(t *testing.T) {
 	c := testWritableVault(t)
+	// Bump debounce so the assertion below runs comfortably inside the
+	// debounce window even on slow CI runners (Windows fsnotify can take
+	// 50-100ms per event).
+	c.debounceDelay = 200 * time.Millisecond
 	ctx := context.Background()
 
-	// Setup : creer un fichier initial + l'indexer.
+	// Seed: create an initial file and index it.
 	target := filepath.Join(c.vaultPath, "target.md")
 	if err := os.WriteFile(target, []byte("# Target initial\n\nv1"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -35,7 +39,7 @@ func TestDebounce_AtomicRenameNoMissingPage(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Simuler atomic temp+rename : ecrire un temp puis rename.
+	// Simulate atomic temp+rename: write a temp then rename over the target.
 	temp := filepath.Join(c.vaultPath, ".target.tmp.md")
 	if err := os.WriteFile(temp, []byte("# Target updated\n\nv2"), 0o644); err != nil {
 		t.Fatalf("temp write: %v", err)
@@ -44,15 +48,15 @@ func TestDebounce_AtomicRenameNoMissingPage(t *testing.T) {
 		t.Fatalf("rename: %v", err)
 	}
 
-	// Pendant la fenetre debounce (avant resolve), interroger l'index : la page
-	// initiale doit toujours etre accessible (pas de fenetre de "page disparue").
+	// During the debounce window (before resolve), the original page must
+	// stay accessible — no "page disappeared" window.
 	page, err := c.GetPage(ctx, "target")
 	if err != nil || page == nil {
 		t.Errorf("page must remain accessible during debounce window, got page=%v err=%v", page, err)
 	}
 
-	// Apres resolution complete, la page doit refleter le nouveau contenu.
-	time.Sleep(250 * time.Millisecond)
+	// After resolve completes, the page must reflect the new content.
+	time.Sleep(400 * time.Millisecond)
 	blocks, err := c.GetPageBlocksTree(ctx, "target")
 	if err != nil {
 		t.Fatalf("GetPageBlocksTree post-resolve: %v", err)
@@ -62,11 +66,15 @@ func TestDebounce_AtomicRenameNoMissingPage(t *testing.T) {
 	}
 }
 
-// TestDebounce_BurstWritesCoalesce simule des ecritures rapprochees (typique
-// vault-preflight burst : Rapport_Scout puis dispatch en cascade) et verifie
-// que seul le dernier etat est resolu (pas une cascade de reindex couteux).
+// TestDebounce_BurstWritesCoalesce simulates rapid successive writes
+// (typical of multi-writer workloads where multiple producers update the
+// same page in quick succession) and verifies that only the final state
+// is resolved — not a cascade of expensive reindexes.
 func TestDebounce_BurstWritesCoalesce(t *testing.T) {
 	c := testWritableVault(t)
+	// Bump debounce to give the burst loop comfortable headroom under
+	// the debounce window even on slow CI.
+	c.debounceDelay = 200 * time.Millisecond
 	ctx := context.Background()
 
 	target := filepath.Join(c.vaultPath, "burst.md")
@@ -75,7 +83,7 @@ func TestDebounce_BurstWritesCoalesce(t *testing.T) {
 	}
 	defer c.Close()
 
-	// 10 ecritures successives en moins de debounceDelay -> 1 seul resolve attendu.
+	// 10 successive writes inside the debounce window → 1 resolve expected.
 	for i := 0; i < 10; i++ {
 		content := strings.NewReplacer("$N", string(rune('0'+i))).Replace("# Burst v$N\n\ncontent $N")
 		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
@@ -84,8 +92,8 @@ func TestDebounce_BurstWritesCoalesce(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Apres debounce + resolve : doit refleter v9 (dernier).
-	time.Sleep(300 * time.Millisecond)
+	// After debounce + resolve: must reflect v9 (the last write).
+	time.Sleep(500 * time.Millisecond)
 	blocks, err := c.GetPageBlocksTree(ctx, "burst")
 	if err != nil {
 		t.Fatalf("GetPageBlocksTree: %v", err)
@@ -95,24 +103,24 @@ func TestDebounce_BurstWritesCoalesce(t *testing.T) {
 	}
 }
 
-// TestIndexFileWithLinks_Atomic verifie qu'un lecteur concurrent ne peut JAMAIS
-// observer un etat ou la page existe dans c.pages mais ou les backlinks ne sont
-// pas encore reconstruits (fenetre intermediaire entre indexFile et BuildBacklinks
-// dans l'ancienne implementation, race 1 du diagnostic Phase 7).
+// TestIndexFileWithLinks_Atomic verifies that a concurrent reader can
+// NEVER observe a state where the page exists in c.pages but backlinks
+// don't yet reflect it (the intermediate window between indexFile and
+// BuildBacklinks in the previous implementation — race 1).
 func TestIndexFileWithLinks_Atomic(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
 
-	// Pre-setup : 1 page qui pointera vers la nouvelle.
+	// Pre-setup: one page that will link to the new target.
 	if err := os.WriteFile(filepath.Join(c.vaultPath, "linker.md"),
-		[]byte("# Linker\n\n- vers [[atomic-target]]"), 0o644); err != nil {
+		[]byte("# Linker\n\n- to [[atomic-target]]"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Reload(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Lecteur concurrent qui spam GetPage + getBacklinks.
+	// Concurrent reader spamming GetPage + getBacklinks.
 	stop := make(chan struct{})
 	var inconsistencies int
 	var mu sync.Mutex
@@ -130,7 +138,7 @@ func TestIndexFileWithLinks_Atomic(t *testing.T) {
 			if page == nil {
 				continue
 			}
-			// Page existe : les backlinks DOIVENT contenir Linker (atomicite).
+			// Page exists: backlinks MUST include Linker (atomicity).
 			c.mu.RLock()
 			bl := c.backlinks[strings.ToLower(page.Name)]
 			c.mu.RUnlock()
@@ -149,7 +157,7 @@ func TestIndexFileWithLinks_Atomic(t *testing.T) {
 		}
 	}()
 
-	// Indexer la page cible 50 fois (chaque indexFileWithLinks doit etre atomique).
+	// Index the target page 50 times (each indexFileWithLinks must be atomic).
 	info, _ := os.Stat(filepath.Join(c.vaultPath, "linker.md"))
 	for i := 0; i < 50; i++ {
 		c.indexFileWithLinks("atomic-target.md", "# Atomic Target\n\nbody", info)
@@ -166,34 +174,34 @@ func TestIndexFileWithLinks_Atomic(t *testing.T) {
 	}
 }
 
-// TestRemovePageWithLinks_Atomic : analogue pour la suppression.
+// TestRemovePageWithLinks_Atomic: analogue for removal.
 func TestRemovePageWithLinks_Atomic(t *testing.T) {
 	c := testWritableVault(t)
 	ctx := context.Background()
 
-	// Pre-setup : page cible + linker.
+	// Pre-setup: target page + linker.
 	if err := os.WriteFile(filepath.Join(c.vaultPath, "removable.md"),
 		[]byte("# Removable\n\nbody"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(c.vaultPath, "linker2.md"),
-		[]byte("# Linker2\n\n- vers [[removable]]"), 0o644); err != nil {
+		[]byte("# Linker2\n\n- to [[removable]]"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Reload(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Verifier setup OK.
+	// Verify setup is OK.
 	page, _ := c.GetPage(ctx, "removable")
 	if page == nil {
 		t.Fatal("setup: removable should exist")
 	}
 
-	// Supprimer atomiquement.
+	// Remove atomically.
 	c.removePageWithLinks("removable")
 
-	// Page absente, backlinks pour 'removable' doivent etre vides ou absents.
+	// Page absent; backlinks for 'removable' should be empty or missing.
 	page, _ = c.GetPage(ctx, "removable")
 	if page != nil {
 		t.Errorf("page should be removed, got %+v", page)
@@ -201,14 +209,15 @@ func TestRemovePageWithLinks_Atomic(t *testing.T) {
 	c.mu.RLock()
 	bl := c.backlinks["removable"]
 	c.mu.RUnlock()
-	// Note : les backlinks d'autres pages POINTANT vers removable peuvent persister
-	// jusqu'au prochain rebuild des sources — c'est OK, le contrat est l'atomicite
-	// vis-a-vis de l'index principal c.pages, pas la coherence transitive.
+	// Note: backlinks from other pages still POINTING at 'removable' may
+	// persist until those source pages are rebuilt — that's fine. The
+	// contract is atomicity with respect to the primary index c.pages,
+	// not transitive consistency.
 	_ = bl
 }
 
-// TestScheduleEventResolution_Coalesce : 5 events successifs sur le meme path
-// dans la fenetre debounce ne declenchent qu'1 seul resolve.
+// TestScheduleEventResolution_Coalesce: 5 successive events for the same
+// path within the debounce window must yield exactly 1 resolve.
 func TestScheduleEventResolution_Coalesce(t *testing.T) {
 	c := testWritableVault(t)
 	c.debounceDelay = 50 * time.Millisecond
@@ -218,13 +227,13 @@ func TestScheduleEventResolution_Coalesce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 5 events successifs en moins de 50ms.
+	// 5 successive events inside the 50ms window.
 	for i := 0; i < 5; i++ {
 		c.scheduleEventResolution(target, "coalesce.md")
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Avant le delay : 1 timer pending (les 4 precedents stoppes).
+	// Before delay: 1 pending timer (the previous 4 were stopped).
 	c.pendingMu.Lock()
 	pending := len(c.pendingEvents)
 	c.pendingMu.Unlock()
@@ -232,7 +241,7 @@ func TestScheduleEventResolution_Coalesce(t *testing.T) {
 		t.Errorf("expected 1 pending event after 5 schedules, got %d", pending)
 	}
 
-	// Apres delay + marge : pending vide, page indexee.
+	// After delay + margin: pending empty, page indexed.
 	time.Sleep(150 * time.Millisecond)
 	c.pendingMu.Lock()
 	pending = len(c.pendingEvents)
