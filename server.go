@@ -302,6 +302,21 @@ func newServer(b backend.Backend, readOnly bool) *mcp.Server {
 				Content: []mcp.Content{&mcp.TextContent{Text: "Vault reloaded successfully"}},
 			}, nil
 		})
+
+		// --- Attachment tools (Obsidian-specific, write enabled) ---
+		attachments := tools.NewAttachments(vaultClient)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "upload_attachment",
+			Description: "Upload a binary file (PDF, image, audio, etc) to the vault at the given path. Parent directories are auto-created. The path must be relative to the vault root and cannot end in .md (use create_page for markdown). Content is base64-encoded.",
+		}, attachments.Upload)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "delete_attachment",
+			Description: "Delete a binary attachment by path (relative to vault root). Cannot delete .md files (use delete_page).",
+		}, attachments.Delete)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "list_attachments",
+			Description: "List non-.md files (binaries, attachments) in a folder relative to vault root. Set recursive=true to walk sub-folders. Returns entries with path, size, and modification time.",
+		}, attachments.List)
 	}
 
 	return srv
